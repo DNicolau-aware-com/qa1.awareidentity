@@ -1,0 +1,469 @@
+openapi: 3.0.3
+info:
+  title: Aware Face Liveness API
+  version: "3.0.0"
+  description: |
+    Face liveness and face comparison endpoints for the Aware Awareness platform.
+servers:
+  - url: https://api.dev1.awareidentity.com
+    description: Development environment
+
+security:
+  - ApiKeyAuth: []
+    AccountIdAuth: []
+
+paths:
+  /v3/face/checkLiveness:
+    post:
+      operationId: checkFaceLiveness
+      summary: Check whether the face in the supplied image is live.
+      security:
+        - ApiKeyAuth: []
+          AccountIdAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaceLivenessRequest'
+      responses:
+        '200':
+          description: Liveness check completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaceLivenessResponse'
+        '404':
+          description: |
+            A referenced resource was not found. Either the account is unknown, or a
+            `policyName` was supplied that does not match any enabled liveness policy
+            for the tenant (errorCode `POLICY_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            Multiple enabled liveness policies exist for the tenant and no `policyName`
+            was supplied in the request. The caller must include `policyName` to
+            disambiguate. errorCode: `MULTIPLE_POLICIES_CONFIGURED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                multiplePolicies:
+                  value:
+                    errorCode: MULTIPLE_POLICIES_CONFIGURED
+                    message: "Multiple policies are configured for this API type. Please provide policyName in the request payload."
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+
+  /v3/face/compare:
+    post:
+      operationId: compareFaces
+      summary: Compare a probe face image against a candidate face image.
+      security:
+        - ApiKeyAuth: []
+          AccountIdAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaceCompareRequest'
+      responses:
+        '200':
+          description: Face comparison completed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FaceCompareResponse'
+              examples:
+                twoAlgorithms:
+                  summary: Two-algorithm decision/reporting response
+                  value:
+                    faceCompare:
+                      score: 30.0
+                      match: true
+                      configuration:
+                        algorithms:
+                          - name: F500
+                            score: 30.0
+                            match: true
+                            version: "5.0.0-SNAPSHOT"
+                            role: DECISIONING
+                            configuration:
+                              scoreThreshold: 4
+                          - name: F200
+                            score: 14.6
+                            match: true
+                            version: "5.0.0-SNAPSHOT"
+                            role: REPORTING_ONLY
+                            configuration:
+                              scoreThreshold: 4
+                      correlationID: "ABCDE-003498S"
+                      timestamp: 1779331664576
+                      transactionID: "aec9969f-aa5c-4038-aee4-f442f68f93b7"
+        '404':
+          description: |
+            A referenced resource was not found. Either the account is unknown, or a
+            `policyName` was supplied that does not match any enabled facematcher policy
+            for the tenant (errorCode `POLICY_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            Multiple enabled facematcher policies exist for the tenant and no `policyName`
+            was supplied in the request. The caller must include `policyName` to
+            disambiguate. errorCode: `MULTIPLE_POLICIES_CONFIGURED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                multiplePolicies:
+                  value:
+                    errorCode: MULTIPLE_POLICIES_CONFIGURED
+                    message: "Multiple policies are configured for this API type. Please provide policyName in the request payload."
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalError'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Aware-ApiKey
+      description: Aware-issued API key.
+    AccountIdAuth:
+      type: apiKey
+      in: header
+      name: X-Aware-AccountId
+      description: Aware account identifier associated with the API key.
+
+  schemas:
+    FaceLivenessRequest:
+      type: object
+      required: [faceLiveness]
+      properties:
+        faceLiveness:
+          type: object
+          required: [images, captureDevice]
+          properties:
+            images:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: string
+                    format: byte
+                    description: Base64-encoded image (e.g. JPG, PNG).
+            captureDevice:
+              type: string
+              enum: [MOBILE_SELFIE, OTHER]
+            correlationID:
+              type: string
+              description: Optional caller-supplied identifier, echoed back in the response.
+            policyName:
+              type: string
+              description: |
+                Optional name of the biometric policy (enabled `liveness` configuration)
+                to apply. When omitted, the tenant must have exactly one enabled liveness
+                policy — otherwise the server returns HTTP 409 with errorCode
+                `MULTIPLE_POLICIES_CONFIGURED`. When supplied, the named policy must
+                exist and be enabled or the server returns HTTP 404 with errorCode
+                `POLICY_NOT_FOUND`.
+              example: "Face Liveness - 001"
+
+    FaceLivenessResponse:
+      type: object
+      required: [faceLiveness]
+      properties:
+        faceLiveness:
+          type: object
+          required: [transactionID, decision, score, configuration, timestamp]
+          properties:
+            transactionID:
+              type: string
+              description: ID assigned to the transaction by the Awareness platform.
+            decision:
+              $ref: '#/components/schemas/LivenessDecision'
+            score:
+              type: number
+              format: double
+              description: |
+                Liveness score from the first decisioning algorithm, normalized to `[0, 1]`.
+                Higher values indicate higher confidence that the subject is live; lower values
+                indicate higher confidence of a spoof. The decision boundary depends on the
+                algorithm's configured threshold (e.g. MITEK `scoreThreshold`, AWARE
+                `securitySetting`-derived workflow threshold).
+            configuration:
+              type: object
+              required: [algorithms]
+              properties:
+                algorithms:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Algorithm'
+            timestamp:
+              type: integer
+              format: int64
+              description: Unix epoch milliseconds at which the transaction was processed.
+            correlationID:
+              type: string
+              description: Echo of the request correlationID, if one was supplied.
+
+    LivenessDecision:
+      type: string
+      enum:
+        - LIVE
+        - SPOOF
+        - POSE_TOO_HIGH
+        - TOO_LOW_FACIAL_DYNAMIC_RANGE
+        - FACE_TOO_LOW_RESOLUTION
+        - UNABLE_TO_CALCULATE_LIVENESS
+
+    AlgorithmRole:
+      type: string
+      enum:
+        - DECISIONING
+        - REPORTING_ONLY
+
+    Algorithm:
+      description: |
+        A single algorithm entry. Each entry is strictly either a Mitek or an Aware algorithm,
+        discriminated by the `name` field. A response may contain one, the other, or both.
+      oneOf:
+        - $ref: '#/components/schemas/MitekAlgorithm'
+        - $ref: '#/components/schemas/AwareAlgorithm'
+      discriminator:
+        propertyName: name
+        mapping:
+          MITEK: '#/components/schemas/MitekAlgorithm'
+          AWARE: '#/components/schemas/AwareAlgorithm'
+
+    MitekAlgorithm:
+      type: object
+      required: [name, version, role, decision, score, configuration]
+      properties:
+        name:
+          type: string
+          enum: [MITEK]
+        version:
+          type: string
+        role:
+          $ref: '#/components/schemas/AlgorithmRole'
+        decision:
+          $ref: '#/components/schemas/LivenessDecision'
+        score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: |
+            Mitek-reported probability that the image is live, in `[0, 1]`. A `LIVE` decision
+            is returned when `score > scoreThreshold`.
+        configuration:
+          type: object
+          properties:
+            scoreThreshold:
+              type: number
+              format: double
+              minimum: 0
+              maximum: 1
+              description: |
+                Mitek score threshold used to determine LIVE vs SPOOF, in `[0, 1]`. Defaults
+                to `0.5` when not supplied by the tenant policy.
+
+    AwareAlgorithm:
+      type: object
+      required: [name, version, role, decision, score, configuration]
+      properties:
+        name:
+          type: string
+          enum: [AWARE]
+        version:
+          type: string
+        role:
+          $ref: '#/components/schemas/AlgorithmRole'
+        decision:
+          $ref: '#/components/schemas/LivenessDecision'
+        score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: |
+            Aware-normalized liveness confidence in `[0, 1]`, anchored at the resolved workflow
+            decision threshold (0.5 is the boundary, 1.0 is clearly live, 0.0 is clearly spoof).
+        configuration:
+          type: object
+          properties:
+            securitySetting:
+              type: string
+              enum: [HIGH_USABILITY, BALANCED, HIGH_SECURITY]
+              description: |
+                Aware-specific high-level setting that selects the internal per-workflow
+                decision threshold. This is the primary control for Aware liveness; numeric
+                thresholds are not honored directly.
+
+    FaceCompareRequest:
+      type: object
+      required: [faceCompare]
+      properties:
+        faceCompare:
+          type: object
+          required: [probe, candidate]
+          properties:
+            probe:
+              $ref: '#/components/schemas/FaceImage'
+            candidate:
+              $ref: '#/components/schemas/FaceImage'
+            correlationID:
+              type: string
+              description: Optional caller-supplied identifier, echoed back in the response.
+            policyName:
+              type: string
+              description: |
+                Optional name of the biometric policy (enabled `facematcher` configuration)
+                to apply. When omitted, the tenant must have exactly one enabled facematcher
+                policy — otherwise the server returns HTTP 409 with errorCode
+                `MULTIPLE_POLICIES_CONFIGURED`. When supplied, the named policy must
+                exist and be enabled or the server returns HTTP 404 with errorCode
+                `POLICY_NOT_FOUND`.
+              example: "Face Matcher"
+
+    FaceCompareResponse:
+      type: object
+      required: [faceCompare]
+      properties:
+        faceCompare:
+          type: object
+          required: [score, match, configuration, timestamp, transactionID]
+          properties:
+            score:
+              type: number
+              format: double
+              minimum: 0
+              description: |
+                Overall similarity score. Range is `[0, +inf)` — lower values indicate lower
+                similarity and higher values indicate greater similarity (more likely a match).
+            match:
+              type: boolean
+              description: Whether the probe and candidate are deemed a match.
+            configuration:
+              type: object
+              required: [algorithms]
+              properties:
+                algorithms:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/MatchAlgorithm'
+            timestamp:
+              type: integer
+              format: int64
+              description: Unix epoch milliseconds at which the transaction was processed.
+            transactionID:
+              type: string
+              description: ID assigned to the transaction by the Awareness platform.
+            correlationID:
+              type: string
+              description: Echo of the request correlationID, if one was supplied.
+
+    FaceImage:
+      type: object
+      required: [image]
+      properties:
+        image:
+          type: string
+          format: byte
+          description: Base64-encoded face image (e.g. JPG, PNG).
+
+    MatchAlgorithm:
+      type: object
+      required: [name, version, role, match, score, configuration]
+      properties:
+        name:
+          type: string
+          description: |
+            Algorithm name (e.g. `F500`, `F200`). Open string; the set of values is not
+            constrained and new algorithms may be added without breaking the schema.
+        version:
+          type: string
+        role:
+          $ref: '#/components/schemas/AlgorithmRole'
+        match:
+          type: boolean
+          description: Match decision for this specific algorithm.
+        score:
+          type: number
+          format: double
+          minimum: 0
+          description: Score for this specific algorithm. Same direction as the top-level score.
+        configuration:
+          type: object
+          properties:
+            scoreThreshold:
+              type: number
+              description: Score threshold used to determine match for this algorithm.
+
+    Error:
+      type: object
+      required: [message]
+      properties:
+        errorCode:
+          type: string
+          description: |
+            Machine-readable error code. Present on errors that carry a stable identifier;
+            absent on generic 4xx/5xx responses. Examples: `MULTIPLE_POLICIES_CONFIGURED`,
+            `POLICY_NOT_FOUND`.
+          example: MULTIPLE_POLICIES_CONFIGURED
+        timestamp:
+          type: string
+          description: |
+            Server-local timestamp at which the error occurred, in ISO-8601 form with
+            nanosecond precision (e.g. `2026-05-14T17:16:06.908638974`). No timezone offset
+            is included.
+        status:
+          type: integer
+          description: HTTP status code.
+          example: 404
+        error:
+          type: string
+          description: HTTP status reason phrase.
+          example: Not Found
+        message:
+          type: string
+          description: Human-readable error message.
+          example: "Account not found with accountNumber: 1234"
+        fieldErrors:
+          type: array
+          nullable: true
+          description: |
+            Field-level validation errors when the failure stems from request validation;
+            `null` otherwise. Item shape is not yet documented here.
+          items:
+            type: object
+
+    InternalError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Short description of the internal failure.
+          example: internal error
