@@ -1,0 +1,210 @@
+[
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_returns_200",
+    "transactionID": "4b1603b4-7b05-446f-b7e0-561dd5a57c21",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:32:52Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_response_contains_required_fields",
+    "transactionID": "5db54667-1e77-42c8-840e-93aeb4d393dd",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:32:55Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_decision_is_valid_enum",
+    "transactionID": "ac6a4f64-b042-44ce-b121-f72908b267e3",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:32:57Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_score_is_normalized",
+    "transactionID": "85720ae0-4751-41d3-92a5-529f3497ebc5",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:00Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_algorithms_list_is_non_empty",
+    "transactionID": "74689d86-304e-4799-a86b-69856941144c",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:02Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_algorithm_role_is_valid_enum",
+    "transactionID": "ec5f8730-6f4f-4b1b-bd68-f27d8a7dc383",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:05Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_algorithm_decision_is_valid_enum",
+    "transactionID": "1137f6a3-4f4d-47a4-b1f7-ee3dd2037ace",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:07Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_algorithm_type_specific_config",
+    "transactionID": "4fbba89c-135f-421a-b244-205d760b32cd",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:09Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_algorithm_score_is_normalized",
+    "transactionID": "b5b83f26-de6c-4179-960b-c1704dc9056f",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:12Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_correlation_id_is_echoed",
+    "transactionID": "d2699719-c452-401c-8539-1f4ee29a8b75",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:14Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_request_without_correlation_id_succeeds",
+    "transactionID": "8f60abd0-2530-45b4-9216-dbe8d1ef01dd",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:17Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_capture_device_other_is_accepted",
+    "transactionID": "15da1dd0-1b76-41ea-8057-a83bebdb2d59",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.8724988454736358,
+    "timestamp": "2026-06-08T14:33:19Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_multiple_images_accepted",
+    "transactionID": "896b723e-6faf-44a5-9f5a-7ceb58be6b89",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:22Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_timestamp_is_integer_milliseconds",
+    "transactionID": "e1f19d9a-8016-4d50-9e21-427a45b13f3f",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:24Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_transaction_id_is_string",
+    "transactionID": "7b4ab537-7903-42a0-a1ef-5c225d68d9a6",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:27Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessHappyPath::test_response_content_type_is_json",
+    "transactionID": "6a390a36-881a-43de-8e18-118ea88cfe46",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:29Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessBusinessLogic::test_spoof_image_returns_spoof_decision",
+    "transactionID": "fbf033d8-47b0-41d1-a4c5-3be5cca0444a",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "SPOOF",
+    "score": 0.0,
+    "timestamp": "2026-06-08T14:33:32Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessBusinessLogic::test_live_score_higher_than_spoof_score",
+    "transactionID": "570dc00b-428c-4ed9-9519-cf7d93ff6212",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:36Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessBusinessLogic::test_live_score_higher_than_spoof_score",
+    "transactionID": "2a6f6440-3ffa-44a9-ab03-3e2e16d9b489",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "SPOOF",
+    "score": 0.0,
+    "timestamp": "2026-06-08T14:33:39Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessBusinessLogic::test_decisioning_algorithm_matches_top_level_decision",
+    "transactionID": "00777dc0-bc74-40bf-83b7-36522882167f",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:42Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessBusinessLogic::test_reporting_only_does_not_affect_top_level_decision",
+    "transactionID": "94b78b2f-bdb5-42d4-a6f5-67d2e812dfe9",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "SPOOF",
+    "score": 0.0,
+    "timestamp": "2026-06-08T14:33:45Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessBusinessLogic::test_two_requests_have_different_transaction_ids",
+    "transactionID": "b44df09f-b0e5-413b-b46a-51247a7fa190",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:47Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessBusinessLogic::test_two_requests_have_different_transaction_ids",
+    "transactionID": "8fbd3ace-bbaf-4e7d-9998-955c9a867d10",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:49Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessBusinessLogic::test_single_char_correlation_id_echoed",
+    "transactionID": "487117a2-e600-4273-82a3-a09d415b0487",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:52Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessBusinessLogic::test_empty_string_correlation_id_behavior",
+    "transactionID": "9290f33c-f246-4dcd-95dd-b93449d24da5",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:33:54Z"
+  },
+  {
+    "test": "tests/test_face_liveness.py::TestCheckFaceLivenessSecurity::test_xss_in_correlation_id_is_echoed_safely",
+    "transactionID": "4426649d-e807-4126-acb9-1d161aa8464c",
+    "endpoint": "/v3/face/checkLiveness",
+    "decision": "LIVE",
+    "score": 0.6765962707024391,
+    "timestamp": "2026-06-08T14:34:14Z"
+  }
+]

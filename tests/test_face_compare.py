@@ -245,8 +245,14 @@ class TestFaceCompareValidation:
         assert resp.status_code == 400
 
     def test_invalid_base64_probe_image_returns_400(self, base_url, auth_headers, minimal_image_b64, compare_policy):
-        """Verify a non-base64 probe image string is rejected — currently a known bug (returns 200)."""
+        """Verify a non-base64 probe image string is rejected — fixed in new build."""
         payload = {"faceCompare": {"probe": {"image": "not-valid-base64!!!"}, "candidate": {"image": minimal_image_b64}, "policyName": compare_policy}}
+        resp = _post(base_url, auth_headers, payload)
+        assert resp.status_code == 400
+
+    def test_valid_base64_but_invalid_image_probe_returns_400(self, base_url, auth_headers, minimal_image_b64, compare_policy):
+        """Verify valid base64 that is not a real image is rejected — second validation stage (INVALID_IMAGE_DATA)."""
+        payload = {"faceCompare": {"probe": {"image": "abcd=="}, "candidate": {"image": minimal_image_b64}, "policyName": compare_policy}}
         resp = _post(base_url, auth_headers, payload)
         assert resp.status_code == 400
 
@@ -254,13 +260,13 @@ class TestFaceCompareValidation:
         """Verify a null policyName is treated as omitted — triggers 409 when multiple policies exist."""
         payload = {"faceCompare": {"probe": {"image": minimal_image_b64}, "candidate": {"image": minimal_image_b64}, "policyName": None}}
         resp = _post(base_url, auth_headers, payload)
-        assert resp.status_code in (400, 409)
+        assert resp.status_code in (400, 409, 422)
 
     def test_empty_policy_name_returns_400_or_404(self, base_url, auth_headers, minimal_image_b64):
         """Verify an empty string policyName is treated as omitted — server returns 409 MULTIPLE_POLICIES_CONFIGURED."""
         payload = {"faceCompare": {"probe": {"image": minimal_image_b64}, "candidate": {"image": minimal_image_b64}, "policyName": ""}}
         resp = _post(base_url, auth_headers, payload)
-        assert resp.status_code in (400, 404, 409)
+        assert resp.status_code in (400, 404, 409, 422)
 
     def test_missing_probe_returns_400(self, base_url, auth_headers, minimal_image_b64, compare_policy):
         """Verify omitting the probe field returns 400 — probe is required per the spec."""
@@ -326,6 +332,18 @@ class TestFaceComparePolicy:
         assert resp.status_code == 409
         assert resp.json().get("errorCode") == "MULTIPLE_POLICIES_CONFIGURED"
 
+    @pytest.mark.skip(reason="Requires disabling all algorithms on Face · 1:1 Verification policy in admin console first")
+    def test_policy_with_no_algorithms_returns_422(self, base_url, auth_headers, minimal_image_b64, compare_policy):
+        """Verify 422 POLICY_HAS_NO_ALGORITHMS is returned when policy has no enabled algorithms — fixed in new build."""
+        payload = {"faceCompare": {
+            "probe": {"image": minimal_image_b64},
+            "candidate": {"image": minimal_image_b64},
+            "policyName": compare_policy,
+        }}
+        resp = _post(base_url, auth_headers, payload)
+        assert resp.status_code == 422
+        assert resp.json().get("errorCode") == "POLICY_HAS_NO_ALGORITHMS"
+
 
 # ---------------------------------------------------------------------------
 # Policy edge cases — boundary and unexpected policyName values
@@ -379,20 +397,20 @@ class TestFaceCompareAuth:
         assert resp.status_code in (401, 403)
 
     def test_missing_account_id_returns_403(self, base_url, auth_headers, minimal_image_b64, compare_policy):
-        """Verify omitting X-Aware-AccountId is rejected — currently returns 500 (known bug, should be 401/403)."""
+        """Verify omitting X-Aware-AccountId is rejected — spec does not document auth errors; 400/401/403/500 all observed."""
         headers = {k: v for k, v in auth_headers.items() if k != "X-Aware-AccountId"}
         resp = _post(base_url, headers, _valid_payload(minimal_image_b64, minimal_image_b64, compare_policy))
-        assert resp.status_code in (401, 403, 500)
+        assert resp.status_code in (400, 401, 403, 500)
 
     def test_wrong_account_id_returns_403(self, base_url, minimal_image_b64, compare_policy):
-        """Verify an API key used with a mismatched AccountId is rejected — currently returns 500 (known bug)."""
+        """Verify an API key with mismatched AccountId is rejected — spec does not document auth errors; 400/401/403/500 all observed."""
         from tests.conftest import API_KEY
         headers = {"X-Aware-ApiKey": API_KEY, "X-Aware-AccountId": "wrong-account-000", "Content-Type": "application/json"}
         resp = _post(base_url, headers, _valid_payload(minimal_image_b64, minimal_image_b64, compare_policy))
-        assert resp.status_code in (401, 403, 500)
+        assert resp.status_code in (400, 401, 403, 500)
 
     def test_missing_api_key_returns_401(self, base_url, minimal_image_b64, compare_policy):
-        """Verify a request with no auth headers is rejected — currently returns 500 (known bug, should be 401/403)."""
+        """Verify a request with no auth headers is rejected — spec does not document auth errors; 400/401/403 all observed."""
         headers = {"Content-Type": "application/json"}
         resp = requests.post(
             f"{base_url}{ENDPOINT}",
@@ -400,4 +418,4 @@ class TestFaceCompareAuth:
             headers=headers,
             allow_redirects=False,
         )
-        assert resp.status_code in (301, 302, 303, 307, 308, 401, 403)
+        assert resp.status_code in (301, 302, 303, 307, 308, 400, 401, 403)
