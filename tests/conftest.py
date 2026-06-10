@@ -8,6 +8,7 @@ import requests as _requests_module
 
 BASE_URL = os.getenv("AWARE_BASE_URL", "https://api.qa1.awareidentity.com")
 API_KEY = os.getenv("AWARE_API_KEY", "b24c47b255e537c3ca343bc29bc1ad02319fe87c606739bf94f387c70a651853")
+API_KEY_2 = os.getenv("AWARE_API_KEY_2", "3d7e5e33629460b9a2ab46b896fc98742dcbf6d815c9f9d4fcfca80477160f92")
 ACCOUNT_ID = os.getenv("AWARE_ACCOUNT_ID", "0001")
 LIVENESS_POLICY = os.getenv("AWARE_LIVENESS_POLICY", "Face Liveness")
 COMPARE_POLICY = os.getenv("AWARE_COMPARE_POLICY", "Face · 1:1 Verification")
@@ -112,6 +113,11 @@ def bad_auth_headers():
         "X-Aware-AccountId": ACCOUNT_ID,
         "Content-Type": "application/json",
     }
+
+
+@pytest.fixture(scope="session")
+def second_api_key():
+    return API_KEY_2
 
 
 @pytest.fixture(scope="session")

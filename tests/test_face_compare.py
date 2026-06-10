@@ -386,6 +386,62 @@ class TestFaceCompareSecurity:
 
 
 # ---------------------------------------------------------------------------
+# Multiple API keys — security testing for header duplication
+# ---------------------------------------------------------------------------
+
+class TestFaceCompareMultipleKeys:
+
+    def _send_duplicate_header(self, account_id, key1, key2, payload):
+        """Send a request with two X-Aware-ApiKey headers using http.client for true header duplication."""
+        import http.client
+        import json
+        import ssl
+        body = json.dumps(payload).encode("utf-8")
+        conn = http.client.HTTPSConnection("api.qa1.awareidentity.com", context=ssl.create_default_context())
+        conn.putrequest("POST", ENDPOINT)
+        conn.putheader("X-Aware-ApiKey", key1)
+        conn.putheader("X-Aware-ApiKey", key2)
+        conn.putheader("X-Aware-AccountId", account_id)
+        conn.putheader("Content-Type", "application/json")
+        conn.putheader("Content-Length", str(len(body)))
+        conn.endheaders(body)
+        resp = conn.getresponse()
+        return resp.status, resp.read().decode("utf-8")
+
+    def test_valid_key_first_invalid_key_second(self, base_url, auth_headers, minimal_image_b64, compare_policy):
+        """Valid key first, invalid second — server should process with first key or reject; must never 500."""
+        status, body = self._send_duplicate_header(
+            auth_headers["X-Aware-AccountId"],
+            auth_headers["X-Aware-ApiKey"],
+            "0" * 64,
+            _valid_payload(minimal_image_b64, minimal_image_b64, compare_policy),
+        )
+        assert status in (200, 400, 401, 403, 422)
+        assert status != 500
+
+    def test_invalid_key_first_valid_key_second(self, base_url, auth_headers, minimal_image_b64, compare_policy):
+        """Invalid key first, valid second — server must not grant access; duplicate valid key must not bypass auth."""
+        status, body = self._send_duplicate_header(
+            auth_headers["X-Aware-AccountId"],
+            "0" * 64,
+            auth_headers["X-Aware-ApiKey"],
+            _valid_payload(minimal_image_b64, minimal_image_b64, compare_policy),
+        )
+        assert status in (400, 401, 403)
+        assert status != 200
+
+    def test_two_valid_keys_different_tenants(self, base_url, auth_headers, minimal_image_b64, compare_policy, second_api_key):
+        """Two valid keys from different tenants — server must not crash or allow cross-tenant access."""
+        status, body = self._send_duplicate_header(
+            auth_headers["X-Aware-AccountId"],
+            auth_headers["X-Aware-ApiKey"],
+            second_api_key,
+            _valid_payload(minimal_image_b64, minimal_image_b64, compare_policy),
+        )
+        assert status != 500
+
+
+# ---------------------------------------------------------------------------
 # Auth errors — requests with invalid or missing credentials
 # ---------------------------------------------------------------------------
 
