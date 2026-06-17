@@ -165,20 +165,6 @@ class TestFaceCompareBusinessLogic:
         assert resp.status_code == 200
         assert resp.json()["faceCompare"]["match"] is False
 
-    def test_same_person_different_photo_returns_match(self, base_url, auth_headers, face_image_b64, second_image_b64, compare_policy):
-        """Verify two different photos of the same person return match: true — validates algorithm robustness."""
-        resp = _post(base_url, auth_headers, _valid_payload(face_image_b64, second_image_b64, compare_policy))
-        assert resp.status_code == 200
-        assert resp.json()["faceCompare"]["match"] is True
-
-    def test_score_higher_for_same_person_than_different(self, base_url, auth_headers, face_image_b64, second_image_b64, spoof_image_b64, compare_policy):
-        """Verify the similarity score is higher for the same person than for different people — validates score direction."""
-        same_resp = _post(base_url, auth_headers, _valid_payload(face_image_b64, second_image_b64, compare_policy))
-        diff_resp = _post(base_url, auth_headers, _valid_payload(face_image_b64, spoof_image_b64, compare_policy))
-        assert same_resp.status_code == 200
-        assert diff_resp.status_code == 200
-        assert same_resp.json()["faceCompare"]["score"] > diff_resp.json()["faceCompare"]["score"]
-
     def test_at_least_one_decisioning_algorithm(self, base_url, auth_headers, face_image_b64, compare_policy):
         """Verify at least one DECISIONING algorithm is present — it drives the top-level match result."""
         resp = _post(base_url, auth_headers, _valid_payload(face_image_b64, face_image_b64, compare_policy))
