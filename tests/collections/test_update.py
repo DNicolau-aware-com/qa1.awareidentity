@@ -287,6 +287,26 @@ class TestUpdateValidation:
                               json={"biometricCollection": {"updatedBy": "user@example.com"}}, headers=auth_headers)
         assert resp.status_code == 200
 
+    def test_updated_by_accepts_plain_name(self, base_url, auth_headers, tenant_id, new_collection):
+        """updatedBy accepts a plain name per PATTERN_NAME_OR_EMAIL."""
+        resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
+                              json={"biometricCollection": {"updatedBy": "John Smith"}}, headers=auth_headers)
+        assert resp.status_code == 200
+
+    def test_xss_in_updated_by_returns_400(self, base_url, auth_headers, tenant_id, new_collection):
+        """updatedBy with an XSS payload is rejected — must match PATTERN_NAME_OR_EMAIL."""
+        resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
+                              json={"biometricCollection": {"updatedBy": "<script>alert(1)</script>"}},
+                              headers=auth_headers)
+        assert resp.status_code == 400
+
+    def test_symbols_in_updated_by_returns_400(self, base_url, auth_headers, tenant_id, new_collection):
+        """updatedBy with arbitrary symbols is rejected — must match PATTERN_NAME_OR_EMAIL."""
+        resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
+                              json={"biometricCollection": {"updatedBy": "user; DROP TABLE tenants;--"}},
+                              headers=auth_headers)
+        assert resp.status_code == 400
+
 
 class TestUpdateNotFound:
 

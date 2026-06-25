@@ -129,7 +129,7 @@ class TestListPagination:
         assert len(resp.json()["biometricCollections"]) <= 1
 
     def test_size_over_100_is_capped(self, base_url, auth_headers, tenant_id):
-        """size values above 100 are silently capped to 100."""
+        """size values above 100 are silently capped to 100 (spec: max 100)."""
         resp = requests.get(collection_url(base_url, tenant_id), params={"size": 999}, headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json()["size"] <= 100

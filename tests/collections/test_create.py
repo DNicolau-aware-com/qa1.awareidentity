@@ -150,6 +150,34 @@ class TestCreateValidation:
         assert body.get("errorCode") == "VALIDATION_FAILED"
         assert "fieldErrors" in body
 
+    def test_xss_in_created_by_returns_400(self, base_url, auth_headers, tenant_id):
+        """createdBy with an XSS payload is rejected — must match PATTERN_NAME_OR_EMAIL."""
+        payload = {"biometricCollection": {
+            "name": f"test-{uuid.uuid4().hex[:8]}",
+            "storageType": "STANDARD",
+            "createdBy": "<script>alert(1)</script>",
+        }}
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+
+    def test_symbols_in_created_by_returns_400(self, base_url, auth_headers, tenant_id):
+        """createdBy with arbitrary symbols is rejected — must match PATTERN_NAME_OR_EMAIL."""
+        payload = {"biometricCollection": {
+            "name": f"test-{uuid.uuid4().hex[:8]}",
+            "storageType": "STANDARD",
+            "createdBy": "user; DROP TABLE tenants;--",
+        }}
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+
+    def test_plain_name_in_created_by_is_accepted(self, base_url, auth_headers, tenant_id):
+        """createdBy accepts a plain name (no @) per PATTERN_NAME_OR_EMAIL."""
+        resp = requests.post(collection_url(base_url, tenant_id),
+                             json=create_payload(createdBy="John Smith"), headers=auth_headers)
+        assert resp.status_code == 201
+        requests.delete(collection_url(base_url, tenant_id, resp.json()["biometricCollection"]["id"]),
+                        headers=auth_headers)
+
 
 class TestCreateNameBoundaries:
 

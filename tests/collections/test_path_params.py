@@ -14,28 +14,31 @@ from tests.collections.conftest import collection_url, create_payload
 
 class TestNonUuidCollectionId:
 
-    def test_get_non_uuid_id_returns_400_or_404(self, base_url, auth_headers, tenant_id):
-        """[BUG-2] GET with a non-UUID collectionId must return 400 or 404.
-        Currently returns 500 — MethodArgumentTypeMismatchException is unhandled.
-        MUST FAIL until fixed."""
+    def test_get_non_uuid_id_returns_400(self, base_url, auth_headers, tenant_id):
+        """GET with a non-UUID collectionId must return 400 VALIDATION_FAILED.
+        Spec: MethodArgumentTypeMismatchException → 400 VALIDATION_FAILED.
+        Currently returns 500 — MUST FAIL until fixed."""
         resp = requests.get(collection_url(base_url, tenant_id, "not-a-uuid"), headers=auth_headers)
-        assert resp.status_code in (400, 404)
+        assert resp.status_code == 400
+        assert resp.json().get("errorCode") == "VALIDATION_FAILED"
 
-    def test_patch_non_uuid_id_returns_400_or_404(self, base_url, auth_headers, tenant_id):
-        """[BUG-2] PATCH with a non-UUID collectionId must return 400 or 404.
-        Currently returns 500 — MethodArgumentTypeMismatchException is unhandled.
-        MUST FAIL until fixed."""
+    def test_patch_non_uuid_id_returns_400(self, base_url, auth_headers, tenant_id):
+        """PATCH with a non-UUID collectionId must return 400 VALIDATION_FAILED.
+        Spec: MethodArgumentTypeMismatchException → 400 VALIDATION_FAILED.
+        Currently returns 500 — MUST FAIL until fixed."""
         payload = {"biometricCollection": {"updatedBy": "test@aware.com"}}
         resp = requests.patch(collection_url(base_url, tenant_id, "not-a-uuid"),
                               json=payload, headers=auth_headers)
-        assert resp.status_code in (400, 404)
+        assert resp.status_code == 400
+        assert resp.json().get("errorCode") == "VALIDATION_FAILED"
 
-    def test_delete_non_uuid_id_returns_400_or_404(self, base_url, auth_headers, tenant_id):
-        """[BUG-2] DELETE with a non-UUID collectionId must return 400 or 404.
-        Currently returns 500 — MethodArgumentTypeMismatchException is unhandled.
-        MUST FAIL until fixed."""
+    def test_delete_non_uuid_id_returns_400(self, base_url, auth_headers, tenant_id):
+        """DELETE with a non-UUID collectionId must return 400 VALIDATION_FAILED.
+        Spec: MethodArgumentTypeMismatchException → 400 VALIDATION_FAILED.
+        Currently returns 500 — MUST FAIL until fixed."""
         resp = requests.delete(collection_url(base_url, tenant_id, "not-a-uuid"), headers=auth_headers)
-        assert resp.status_code in (400, 404)
+        assert resp.status_code == 400
+        assert resp.json().get("errorCode") == "VALIDATION_FAILED"
 
 
 class TestNonExistentTenantId:
