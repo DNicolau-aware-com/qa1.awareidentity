@@ -42,17 +42,17 @@ def create_collection_payload(name=None):
     return {
         "biometricCollection": {
             "name": name or f"test-coll-{uuid.uuid4().hex[:8]}",
-            "storageType": "STANDARD",
+            "storageType": "CLOUD",
             "createdBy": "test@aware.com",
         }
     }
 
 
 def create_credential_payload(external_user_id=None, **overrides):
-    """Minimal valid credential payload. createdBy is optional per spec."""
+    """Minimal valid credential payload. biometrics must be non-empty (API now rejects empty)."""
     inner = {
         "externalUserId": external_user_id or f"user-{uuid.uuid4().hex[:8]}",
-        "biometrics": {},
+        "biometrics": {"face": [{"data": _DUMMY_IMAGE_B64, "labels": ["front"]}]},
     }
     inner.update(overrides)
     return {"biometricCredential": inner}

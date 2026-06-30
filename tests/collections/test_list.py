@@ -2,6 +2,7 @@
 Tests for GET /v3/tenants/{tenantId}/collections  (list / search / pagination)
 """
 
+import math
 import uuid
 import requests
 
@@ -42,6 +43,60 @@ class TestListHappyPath:
         assert new_collection["id"] in ids
 
 
+class TestListItemShape:
+    """Verify the shape and null-field omission of items returned in the collection list."""
+
+    def test_required_fields_present_on_list_items(self, base_url, auth_headers, tenant_id, new_collection):
+        """Each list item contains all required fields per spec."""
+        resp = requests.get(collection_url(base_url, tenant_id),
+                            params={"name": new_collection["name"]}, headers=auth_headers)
+        assert resp.status_code == 200
+        items = resp.json()["biometricCollections"]
+        assert len(items) >= 1
+        c = next(i for i in items if i["id"] == new_collection["id"])
+        for field in ("id", "tenantId", "name", "storageType", "dedupEnabled", "createdBy", "createdAt", "updatedAt"):
+            assert field in c, f"Missing required field: {field}"
+
+    def test_timestamps_are_integer_epoch_ms_on_list_items(self, base_url, auth_headers, tenant_id, new_collection):
+        """createdAt and updatedAt on list items are positive integers (epoch ms)."""
+        resp = requests.get(collection_url(base_url, tenant_id),
+                            params={"name": new_collection["name"]}, headers=auth_headers)
+        c = next(i for i in resp.json()["biometricCollections"] if i["id"] == new_collection["id"])
+        assert isinstance(c["createdAt"], int) and c["createdAt"] > 0
+        assert isinstance(c["updatedAt"], int) and c["updatedAt"] > 0
+
+    def test_updated_by_omitted_when_null_on_list_items(self, base_url, auth_headers, tenant_id, new_collection):
+        """updatedBy is absent from list items when null (fresh collection never patched)."""
+        resp = requests.get(collection_url(base_url, tenant_id),
+                            params={"name": new_collection["name"]}, headers=auth_headers)
+        c = next(i for i in resp.json()["biometricCollections"] if i["id"] == new_collection["id"])
+        assert "updatedBy" not in c
+
+    def test_description_omitted_when_null_on_list_items(self, base_url, auth_headers, tenant_id, new_collection):
+        """description is absent from list items when the collection has no description."""
+        resp = requests.get(collection_url(base_url, tenant_id),
+                            params={"name": new_collection["name"]}, headers=auth_headers)
+        c = next(i for i in resp.json()["biometricCollections"] if i["id"] == new_collection["id"])
+        assert "description" not in c
+
+    def test_size_in_response_matches_request(self, base_url, auth_headers, tenant_id):
+        """The 'size' field in the response echoes the 'size' parameter from the request."""
+        resp = requests.get(collection_url(base_url, tenant_id), params={"size": 10}, headers=auth_headers)
+        assert resp.status_code == 200
+        assert resp.json()["size"] == 10
+
+    def test_total_pages_matches_total_elements(self, base_url, auth_headers, tenant_id, new_collection):
+        """totalPages == ceil(totalElements / size)."""
+        resp = requests.get(collection_url(base_url, tenant_id),
+                            params={"name": new_collection["name"], "size": 25}, headers=auth_headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        total = body["totalElements"]
+        size = body["size"]
+        expected = math.ceil(total / size) if total > 0 else 0
+        assert body["totalPages"] == expected
+
+
 class TestListFilters:
 
     def test_name_filter_returns_matching(self, base_url, auth_headers, tenant_id, new_collection):
@@ -71,10 +126,11 @@ class TestListFilters:
     def test_storage_type_filter(self, base_url, auth_headers, tenant_id, new_collection):
         """storageType filter returns only collections with that storage type."""
         resp = requests.get(collection_url(base_url, tenant_id),
-                            params={"storageType": "STANDARD"}, headers=auth_headers)
+                            params={"storageType": "CLOUD"}, headers=auth_headers)
         assert resp.status_code == 200
+        assert new_collection["id"] in [c["id"] for c in resp.json()["biometricCollections"]]
         for c in resp.json()["biometricCollections"]:
-            assert c["storageType"] == "STANDARD"
+            assert c["storageType"] == "CLOUD"
 
     def test_dedup_enabled_filter(self, base_url, auth_headers, tenant_id):
         """dedupEnabled=true filter returns only collections with dedupEnabled=true."""
@@ -211,13 +267,13 @@ class TestListFilterCombined:
     def test_name_and_storage_type_combined(self, base_url, auth_headers, tenant_id, new_collection):
         """Combining name and storageType filters returns only matching collections."""
         resp = requests.get(collection_url(base_url, tenant_id),
-                            params={"name": new_collection["name"], "storageType": "STANDARD"},
+                            params={"name": new_collection["name"], "storageType": "CLOUD"},
                             headers=auth_headers)
         assert resp.status_code == 200
         items = resp.json()["biometricCollections"]
         assert new_collection["id"] in [c["id"] for c in items]
         for c in items:
-            assert c["storageType"] == "STANDARD"
+            assert c["storageType"] == "CLOUD"
 
     def test_name_and_dedup_combined_no_match(self, base_url, auth_headers, tenant_id, new_collection):
         """name filter + dedupEnabled=true returns empty when the named collection has dedupEnabled=false."""

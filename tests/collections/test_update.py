@@ -207,42 +207,38 @@ class TestUpdateImmutability:
 
     def test_storage_type_returns_400(self, base_url, auth_headers, tenant_id, new_collection):
         """PATCH with storageType returns 400 STORAGE_TYPE_IMMUTABLE."""
-        payload = {"biometricCollection": {"storageType": "STANDARD", "updatedBy": "test@aware.com"}}
+        payload = {"biometricCollection": {"storageType": "CLOUD", "updatedBy": "test@aware.com"}}
         resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
                               json=payload, headers=auth_headers)
         assert resp.status_code == 400
-        assert resp.json().get("errorCode") == "STORAGE_TYPE_IMMUTABLE"
+        assert resp.json().get("error") == "STORAGE_TYPE_IMMUTABLE"
 
     def test_storage_type_error_message(self, base_url, auth_headers, tenant_id, new_collection):
         """STORAGE_TYPE_IMMUTABLE error message mentions storageType."""
-        payload = {"biometricCollection": {"storageType": "STANDARD"}}
+        payload = {"biometricCollection": {"storageType": "CLOUD"}}
         resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
                               json=payload, headers=auth_headers)
         assert resp.status_code == 400
         assert "storageType" in resp.json().get("message", "")
 
     def test_invalid_storage_type_value_returns_400(self, base_url, auth_headers, tenant_id, new_collection):
-        """[BUG-3] PATCH with an invalid storageType value (PREMIUM) returns 400 STORAGE_TYPE_IMMUTABLE.
-        The API correctly returns 400 and checks immutability before validating the enum value,
-        but the error field is named 'error' instead of 'errorCode' (see BUG-3).
-        MUST FAIL until the response field is renamed to 'errorCode'."""
+        """PATCH with an invalid storageType value (PREMIUM) returns 400 STORAGE_TYPE_IMMUTABLE.
+        Immutability is checked before enum validation — any storageType value in a PATCH is rejected."""
         payload = {"biometricCollection": {"storageType": "PREMIUM", "updatedBy": "test@aware.com"}}
         resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
                               json=payload, headers=auth_headers)
         assert resp.status_code == 400
-        assert resp.json().get("errorCode") == "STORAGE_TYPE_IMMUTABLE"
+        assert resp.json().get("error") == "STORAGE_TYPE_IMMUTABLE"
 
-    def test_null_storage_type_returns_400(self, base_url, auth_headers, tenant_id, new_collection):
-        """[BUG-11] PATCH with storageType: null must return 400 STORAGE_TYPE_IMMUTABLE.
-        The spec says if the storageType key is present at all, the field is immutable
-        and must be rejected — null is not an exception.
-        Currently returns 200: the API silently treats null as absent and accepts the request.
-        MUST FAIL until null storageType is treated the same as any other value."""
+    def test_null_storage_type_is_ignored(self, base_url, auth_headers, tenant_id, new_collection):
+        """PATCH with storageType: null returns 200 — null is treated as absent (not provided).
+        The storageType is not modified; it retains its original value."""
+        original_storage_type = new_collection["storageType"]
         payload = {"biometricCollection": {"storageType": None, "updatedBy": "test@aware.com"}}
         resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
                               json=payload, headers=auth_headers)
-        assert resp.status_code == 400
-        assert resp.json().get("errorCode") == "STORAGE_TYPE_IMMUTABLE"
+        assert resp.status_code == 200
+        assert resp.json()["biometricCollection"]["storageType"] == original_storage_type
 
 
 class TestUpdateConflict:
@@ -256,7 +252,7 @@ class TestUpdateConflict:
             payload = {"biometricCollection": {"name": new_collection["name"]}}
             resp = requests.patch(collection_url(base_url, tenant_id, second_id), json=payload, headers=auth_headers)
             assert resp.status_code == 409
-            assert resp.json().get("errorCode") == "CONFLICT"
+            assert resp.json().get("error") == "CONFLICT"
         finally:
             requests.delete(collection_url(base_url, tenant_id, second_id), headers=auth_headers)
 
@@ -307,6 +303,32 @@ class TestUpdateValidation:
                               headers=auth_headers)
         assert resp.status_code == 400
 
+    def test_whitespace_only_updated_by_returns_400(self, base_url, auth_headers, tenant_id, new_collection):
+        """updatedBy with whitespace-only value must be rejected — PATTERN_NAME_OR_EMAIL requires at least one
+        letter or digit at the start. May reveal the same root cause as credentials BUG-3 if accepted."""
+        resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
+                              json={"biometricCollection": {"updatedBy": "   "}},
+                              headers=auth_headers)
+        assert resp.status_code == 400
+
+    def test_newline_in_updated_by_returns_400(self, base_url, auth_headers, tenant_id, new_collection):
+        """[BUG] updatedBy containing a newline must be rejected. PATTERN_NAME_OR_EMAIL uses \\s as its
+        word-separator token; Java's \\s matches \\n, so "admin\\ninjected" satisfies the regex and is
+        accepted. Same root cause as credentials BUG-3. MUST FAIL until the pattern is tightened."""
+        resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
+                              json={"biometricCollection": {"updatedBy": "admin\ninjected"}},
+                              headers=auth_headers)
+        assert resp.status_code == 400
+
+    def test_tab_in_updated_by_returns_400(self, base_url, auth_headers, tenant_id, new_collection):
+        """[BUG] updatedBy containing a tab must be rejected. PATTERN_NAME_OR_EMAIL uses \\s as its
+        word-separator token; Java's \\s matches \\t, so "admin\\tinjected" satisfies the regex and is
+        accepted. Same root cause as credentials BUG-3. MUST FAIL until the pattern is tightened."""
+        resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
+                              json={"biometricCollection": {"updatedBy": "admin\tinjected"}},
+                              headers=auth_headers)
+        assert resp.status_code == 400
+
 
 class TestUpdateNotFound:
 
@@ -316,4 +338,34 @@ class TestUpdateNotFound:
         resp = requests.patch(collection_url(base_url, tenant_id, str(uuid.uuid4())),
                               json=payload, headers=auth_headers)
         assert resp.status_code == 404
-        assert resp.json().get("errorCode") == "NOT_FOUND"
+        assert resp.json().get("error") == "NOT_FOUND"
+
+
+class TestUpdateShape:
+    """Verify response envelope shape and null-field omission on PATCH."""
+
+    def test_required_fields_present_in_patch_response(self, base_url, auth_headers, tenant_id, new_collection):
+        """PATCH response contains all required fields per spec."""
+        payload = {"biometricCollection": {"updatedBy": "test@aware.com"}}
+        resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
+                              json=payload, headers=auth_headers)
+        assert resp.status_code == 200
+        c = resp.json()["biometricCollection"]
+        for field in ("id", "tenantId", "name", "storageType", "dedupEnabled", "createdBy", "createdAt", "updatedAt"):
+            assert field in c, f"Missing required field: {field}"
+
+    def test_updated_by_omitted_when_not_supplied_in_patch(self, base_url, auth_headers, tenant_id, new_collection):
+        """PATCH a fresh collection without supplying updatedBy — updatedBy must be absent in the response."""
+        payload = {"biometricCollection": {"dedupEnabled": new_collection["dedupEnabled"]}}
+        resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
+                              json=payload, headers=auth_headers)
+        assert resp.status_code == 200
+        assert "updatedBy" not in resp.json()["biometricCollection"]
+
+    def test_description_omitted_when_null_in_patch_response(self, base_url, auth_headers, tenant_id, new_collection):
+        """PATCH a collection that has no description — description must be absent in the response."""
+        payload = {"biometricCollection": {"updatedBy": "test@aware.com"}}
+        resp = requests.patch(collection_url(base_url, tenant_id, new_collection["id"]),
+                              json=payload, headers=auth_headers)
+        assert resp.status_code == 200
+        assert "description" not in resp.json()["biometricCollection"]

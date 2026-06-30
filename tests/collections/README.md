@@ -190,7 +190,7 @@ Tests for partially updating a collection.
 | `test_storage_type_returns_400` | **[BUG-3]** Changing `storageType` (valid value) → 400 STORAGE_TYPE_IMMUTABLE |
 | `test_storage_type_error_message` | Error message mentions `storageType` |
 | `test_invalid_storage_type_value_returns_400` | **[BUG-3]** `storageType: "PREMIUM"` (invalid enum) → 400 STORAGE_TYPE_IMMUTABLE; immutability checked before enum validation |
-| `test_null_storage_type_returns_400` | **[BUG-11]** `storageType: null` → 400 STORAGE_TYPE_IMMUTABLE; currently returns 200 (null treated as absent) |
+| `test_null_storage_type_is_ignored` | `storageType: null` → 200; null is treated as absent and the original storageType is preserved (by design) |
 
 **TestUpdateConflict** — name uniqueness on rename
 

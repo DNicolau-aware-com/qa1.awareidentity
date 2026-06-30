@@ -61,13 +61,29 @@ class TestGetByIdDataIntegrity:
         assert resp.json()["biometricCollection"]["tenantId"] == tenant_id
 
 
+class TestGetByIdShape:
+    """Null fields must be omitted from the response per @JsonInclude(NON_NULL)."""
+
+    def test_updated_by_omitted_when_null_on_get_by_id(self, base_url, auth_headers, tenant_id, new_collection):
+        """GET a fresh collection (never patched) — updatedBy must be absent from the response."""
+        resp = requests.get(collection_url(base_url, tenant_id, new_collection["id"]), headers=auth_headers)
+        assert resp.status_code == 200
+        assert "updatedBy" not in resp.json()["biometricCollection"]
+
+    def test_description_omitted_when_null_on_get_by_id(self, base_url, auth_headers, tenant_id, new_collection):
+        """GET a collection created without a description — description must be absent from the response."""
+        resp = requests.get(collection_url(base_url, tenant_id, new_collection["id"]), headers=auth_headers)
+        assert resp.status_code == 200
+        assert "description" not in resp.json()["biometricCollection"]
+
+
 class TestGetByIdNotFound:
 
     def test_nonexistent_id_returns_404(self, base_url, auth_headers, tenant_id):
         """GET with a random UUID returns 404 NOT_FOUND."""
         resp = requests.get(collection_url(base_url, tenant_id, str(uuid.uuid4())), headers=auth_headers)
         assert resp.status_code == 404
-        assert resp.json().get("errorCode") == "NOT_FOUND"
+        assert resp.json().get("error") == "NOT_FOUND"
 
     def test_soft_deleted_collection_returns_404(self, base_url, auth_headers, tenant_id):
         """GET a soft-deleted collection returns 404 NOT_FOUND."""
@@ -80,4 +96,4 @@ class TestGetByIdNotFound:
 
         resp = req.get(collection_url(base_url, tenant_id, cid), headers=auth_headers)
         assert resp.status_code == 404
-        assert resp.json().get("errorCode") == "NOT_FOUND"
+        assert resp.json().get("error") == "NOT_FOUND"

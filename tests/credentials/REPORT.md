@@ -9,7 +9,7 @@
 
 ## Test Suite Breakdown
 
-### `test_auth.py` — 26 tests
+### `test_auth.py` — 26 tests2
 
 #### TestCredentialsAuth
 | Test | Expected | Known Issue |

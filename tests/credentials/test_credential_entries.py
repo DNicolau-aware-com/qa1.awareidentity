@@ -53,7 +53,7 @@ def cred_with_entry(base_url, auth_headers, tenant_id, collection_id):
     user_id = f"entry-ro-{uuid.uuid4().hex[:8]}"
     resp = requests.post(
         credential_url(base_url, tenant_id, collection_id),
-        json={"biometricCredential": {"externalUserId": user_id, "biometrics": {}}},
+        json=create_credential_payload(user_id),
         headers=auth_headers,
     )
     assert resp.status_code == 201, f"Credential setup failed: {resp.text}"
@@ -72,7 +72,7 @@ def fresh_entry(base_url, auth_headers, tenant_id, collection_id):
     user_id = f"entry-rw-{uuid.uuid4().hex[:8]}"
     resp = requests.post(
         credential_url(base_url, tenant_id, collection_id),
-        json={"biometricCredential": {"externalUserId": user_id, "biometrics": {}}},
+        json=create_credential_payload(user_id),
         headers=auth_headers,
     )
     assert resp.status_code == 201, f"Credential setup failed: {resp.text}"
@@ -125,14 +125,14 @@ class TestGetEntryNotFound:
         finally:
             requests.delete(credential_url(base_url, tenant_id, collection_id, cred_id), headers=auth_headers)
 
-    def test_non_uuid_entry_id_does_not_crash(self, base_url, auth_headers, tenant_id, collection_id):
-        """Non-UUID credentialEntryId must not return 500.
-        [BUG #4] Currently returns 500 (unhandled MethodArgumentTypeMismatchException). Should be 400."""
+    def test_non_uuid_entry_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """Non-UUID credentialEntryId must return 400 VALIDATION_FAILED."""
         resp = requests.get(
             entry_url(base_url, tenant_id, collection_id, str(uuid.uuid4()), "not-a-uuid"),
             headers=auth_headers,
         )
-        assert resp.status_code < 500, f"Server crashed with {resp.status_code}: {resp.text}"
+        assert resp.status_code == 400
+        assert resp.json().get("error") == "VALIDATION_FAILED"
 
     def test_nonexistent_entry_returns_404(self, base_url, auth_headers, tenant_id, collection_id, cred_with_entry):
         """GET with a random entryId returns 404."""
@@ -274,15 +274,15 @@ class TestPatchEntryValidation:
         finally:
             requests.delete(credential_url(base_url, tenant_id, collection_id, cred_id), headers=auth_headers)
 
-    def test_non_uuid_entry_id_does_not_crash(self, base_url, auth_headers, tenant_id, collection_id):
-        """Non-UUID credentialEntryId on PATCH must not return 500.
-        [BUG #4] Currently returns 500 (unhandled MethodArgumentTypeMismatchException). Should be 400."""
+    def test_non_uuid_entry_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """Non-UUID credentialEntryId on PATCH must return 400 VALIDATION_FAILED."""
         resp = requests.patch(
             entry_url(base_url, tenant_id, collection_id, str(uuid.uuid4()), "not-a-uuid"),
             json={"credentialEntry": {"labels": ["front"]}},
             headers=auth_headers,
         )
-        assert resp.status_code < 500, f"Server crashed with {resp.status_code}: {resp.text}"
+        assert resp.status_code == 400
+        assert resp.json().get("error") == "VALIDATION_FAILED"
 
 
 # ---------------------------------------------------------------------------
@@ -329,26 +329,21 @@ class TestGetEntryHappyPath:
         assert isinstance(entry.get("updatedAt"), int) and entry["updatedAt"] > 0
 
     def test_labels_omitted_when_entry_has_no_labels(self, base_url, auth_headers, tenant_id, collection_id):
-        """Spec: labels 'Omitted when null or empty' — key must be absent, not [] or null."""
+        """Spec: labels 'Omitted when null or empty' — key must be absent, not [] or null.
+        [BUG] API currently returns "labels": [] instead of omitting the key — MUST FAIL until fixed."""
         user_id = f"nolabel-{uuid.uuid4().hex[:8]}"
         cred_resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": user_id, "biometrics": {}}},
+            json={"biometricCredential": {"externalUserId": user_id, "biometrics": {"face": [{"data": _DUMMY_IMAGE_B64}]}}},
             headers=auth_headers,
         )
         assert cred_resp.status_code == 201
         cred_id = cred_resp.json()["biometricCredential"]["id"]
         try:
-            patch_resp = requests.patch(
-                credential_url(base_url, tenant_id, collection_id, cred_id),
-                json={"biometricCredential": {"biometrics": {"face": [{"data": _DUMMY_IMAGE_B64}]}, "updatedBy": "test@aware.com"}},
-                headers=auth_headers,
-            )
-            assert patch_resp.status_code == 200
             get_resp = requests.get(credential_url(base_url, tenant_id, collection_id, cred_id), headers=auth_headers)
             face_entries = get_resp.json()["biometricCredential"].get("biometrics", {}).get("face", [])
             assert face_entries, "Expected at least one face entry"
-            entry_id = face_entries[-1]["id"]
+            entry_id = face_entries[0]["id"]
             entry_resp = requests.get(entry_url(base_url, tenant_id, collection_id, cred_id, entry_id), headers=auth_headers)
             entry = entry_resp.json().get("biometricCredentialEntry") or entry_resp.json()
             assert "labels" not in entry, f"'labels' key must be absent when no labels set; got: {entry.get('labels')!r}"
@@ -533,6 +528,40 @@ class TestPatchEntryUpdatedBy:
         assert resp.status_code == 400
 
 
+class TestPatchEntryLabelValidation:
+    """Labels on the entry-level PATCH must pass content validation."""
+
+    def test_xss_in_label_returns_400(self, base_url, auth_headers, tenant_id, collection_id, fresh_entry):
+        """[BUG] XSS payload as a label value on entry PATCH must be rejected with 400 — currently returns 200."""
+        cred_id, entry_id = fresh_entry
+        resp = requests.patch(
+            entry_url(base_url, tenant_id, collection_id, cred_id, entry_id),
+            json={"credentialEntry": {"labels": ["<script>alert(1)</script>"]}},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+    def test_sql_injection_in_label_returns_400(self, base_url, auth_headers, tenant_id, collection_id, fresh_entry):
+        """[BUG] SQL injection payload as a label value on entry PATCH must be rejected with 400 — currently returns 200."""
+        cred_id, entry_id = fresh_entry
+        resp = requests.patch(
+            entry_url(base_url, tenant_id, collection_id, cred_id, entry_id),
+            json={"credentialEntry": {"labels": ["' OR 1=1 --"]}},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+    def test_empty_string_label_returns_400(self, base_url, auth_headers, tenant_id, collection_id, fresh_entry):
+        """[BUG] Empty string in the labels array on entry PATCH must be rejected with 400 — currently returns 200."""
+        cred_id, entry_id = fresh_entry
+        resp = requests.patch(
+            entry_url(base_url, tenant_id, collection_id, cred_id, entry_id),
+            json={"credentialEntry": {"labels": [""]}},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+
 class TestModalityEntryLimit:
 
     def test_sixth_entry_exceeds_limit(self, base_url, auth_headers, tenant_id, collection_id):
@@ -540,15 +569,15 @@ class TestModalityEntryLimit:
         user_id = f"limit-{uuid.uuid4().hex[:8]}"
         create_resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": user_id, "biometrics": {}}},
+            json=create_credential_payload(user_id),
             headers=auth_headers,
         )
         assert create_resp.status_code == 201
         cred_id = create_resp.json()["biometricCredential"]["id"]
 
         try:
-            # Add 5 entries — all should succeed
-            for i in range(5):
+            # Add 4 more entries (1 already exists from creation = 5 total) — all should succeed
+            for i in range(4):
                 r = requests.patch(
                     credential_url(base_url, tenant_id, collection_id, cred_id),
                     json={

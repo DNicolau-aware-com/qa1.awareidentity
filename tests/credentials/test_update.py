@@ -12,7 +12,7 @@ import uuid
 import pytest
 import requests
 
-from tests.credentials.conftest import credential_url, create_credential_payload
+from tests.credentials.conftest import credential_url, create_credential_payload, _DUMMY_IMAGE_B64
 
 
 class TestUpdateByIdHappyPath:
@@ -264,8 +264,7 @@ class TestUpdateByIdValidation:
         assert resp.status_code == 400
 
     def test_non_uuid_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
-        """PATCH with a non-UUID credentialId returns 400 VALIDATION_FAILED.
-        Spec: non-UUID path variable → VALIDATION_FAILED. [BUG] Currently 500/error field — MUST FAIL until fixed."""
+        """PATCH with a non-UUID credentialId returns 400 VALIDATION_FAILED."""
         resp = requests.patch(
             credential_url(base_url, tenant_id, collection_id, "not-a-uuid"),
             json={"biometricCredential": {"updatedBy": "test@aware.com"}},
@@ -275,8 +274,7 @@ class TestUpdateByIdValidation:
         assert resp.json().get("error") == "VALIDATION_FAILED"
 
     def test_empty_biometrics_map_returns_400(self, base_url, auth_headers, tenant_id, collection_id, new_credential):
-        """PATCH with biometrics:{} must return 400 — an empty map has nothing to append.
-        [BUG] Currently returns 200 and advances updatedAt with no data change — MUST FAIL until fixed."""
+        """PATCH with biometrics:{} must return 400 — an empty map has nothing to append."""
         resp = requests.patch(
             credential_url(base_url, tenant_id, collection_id, new_credential["id"]),
             json={"biometricCredential": {"biometrics": {}}},
@@ -373,7 +371,7 @@ class TestUpdateByIdValidation:
         """PATCH a valid credentialId via a different collectionId returns 404."""
         resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": f"wrong-coll-{uuid.uuid4().hex[:8]}", "biometrics": {}}},
+            json=create_credential_payload(f"wrong-coll-{uuid.uuid4().hex[:8]}"),
             headers=auth_headers,
         )
         assert resp.status_code == 201
@@ -448,6 +446,49 @@ class TestUpdateByIdUpdatedByValidation:
         resp = requests.patch(
             credential_url(base_url, tenant_id, collection_id, new_credential["id"]),
             json={"biometricCredential": {"updatedBy": "user\nname"}},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+
+class TestUpdateByIdLabelValidation:
+    """Labels within biometrics entries on credential PATCH must pass content validation."""
+
+    def test_xss_in_label_returns_400(self, base_url, auth_headers, tenant_id, collection_id, new_credential):
+        """XSS payload as a label value on credential PATCH is rejected with 400."""
+        resp = requests.patch(
+            credential_url(base_url, tenant_id, collection_id, new_credential["id"]),
+            json={"biometricCredential": {"biometrics": {"face": [{"data": _DUMMY_IMAGE_B64, "labels": ["<script>alert(1)</script>"]}]}}},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+    def test_sql_injection_in_label_returns_400(self, base_url, auth_headers, tenant_id, collection_id, new_credential):
+        """SQL injection payload as a label value on credential PATCH is rejected with 400."""
+        resp = requests.patch(
+            credential_url(base_url, tenant_id, collection_id, new_credential["id"]),
+            json={"biometricCredential": {"biometrics": {"face": [{"data": _DUMMY_IMAGE_B64, "labels": ["' OR 1=1 --"]}]}}},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+    def test_empty_string_label_returns_400(self, base_url, auth_headers, tenant_id, collection_id, new_credential):
+        """Empty string in the labels array on credential PATCH is rejected with 400."""
+        resp = requests.patch(
+            credential_url(base_url, tenant_id, collection_id, new_credential["id"]),
+            json={"biometricCredential": {"biometrics": {"face": [{"data": _DUMMY_IMAGE_B64, "labels": [""]}]}}},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+
+class TestUpdateByIdCorrelationIdValidation:
+
+    def test_xss_in_correlation_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id, new_credential):
+        """XSS payload in correlationId on PATCH is rejected with 400."""
+        resp = requests.patch(
+            credential_url(base_url, tenant_id, collection_id, new_credential["id"]),
+            json={"biometricCredential": {"correlationId": "<script>alert(1)</script>"}},
             headers=auth_headers,
         )
         assert resp.status_code == 400
@@ -600,7 +641,7 @@ class TestUpdateByUserIdValidation:
         user_id = f"deleted-upsert-{uuid.uuid4().hex[:8]}"
         create_resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": user_id, "biometrics": {}}},
+            json=create_credential_payload(user_id),
             headers=auth_headers,
         )
         assert create_resp.status_code == 201

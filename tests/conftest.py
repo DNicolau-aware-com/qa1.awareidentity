@@ -8,15 +8,108 @@ import requests as _requests_module
 
 BASE_URL = os.getenv("AWARE_BASE_URL", "https://api.qa2.awareidentity.com")
 API_KEY = os.getenv("AWARE_API_KEY", "b6b951000c48039fba9f48246c66fd075b5bc2951c78a9c8e88103424c119117")
-API_KEY_2 = os.getenv("AWARE_API_KEY_2", "f4847344231fd62e1858fc47b4297520b4c1d0d551671ff7fb29c37406c689e7")  # testtest1 tenant
+API_KEY_2 = os.getenv("AWARE_API_KEY_2", "9977e1c12a625f536e2cae3da4678ae99b6d837a0f93ea34deffcc4463fad6fb")  # test02 tenant
 ACCOUNT_ID = os.getenv("AWARE_ACCOUNT_ID", "0001")
 LIVENESS_POLICY = os.getenv("AWARE_LIVENESS_POLICY", "Face Liveness")
 COMPARE_POLICY = os.getenv("AWARE_COMPARE_POLICY", "Face · 1:1 Verification")
 TEST_IMAGE_PATH = os.getenv("AWARE_TEST_IMAGE_PATH", "")
 SPOOF_IMAGE_PATH = os.getenv("AWARE_SPOOF_IMAGE_PATH", "")
 TENANT_ID = os.getenv("AWARE_TENANT_ID", "b3b8c292-2305-4e06-85c6-71fbb0519255")    # test01 (TENANT)
-TENANT_ID_2 = os.getenv("AWARE_TENANT_ID_2", "efd53128-7c95-47c3-bf7b-2f86d00848f0")  # testtest1 (TENANT)
+TENANT_ID_2 = os.getenv("AWARE_TENANT_ID_2", "57bf3cfb-09c7-4dc5-8d33-68423e269bba")  # test02 (TENANT)
 ACCOUNT_ID_2 = os.getenv("AWARE_ACCOUNT_ID_2", "0001")
+
+# ---------------------------------------------------------------------------
+# Keycloak/OIDC bearer token for endpoints behind the Istio JWT filter
+# (data-retention-policy, security-settings).
+#
+# Three ways to supply it, checked in order:
+#   1. A ready token  — env AWARE_BEARER_TOKEN, or a gitignored tests/.bearer_token file.
+#   2. User creds      — env AWARE_USERNAME + AWARE_PASSWORD (password grant).
+#   3. A creds file    — gitignored tests/.keycloak_creds with KEY=VALUE lines:
+#                          USERNAME=...  PASSWORD=...  (optional CLIENT_ID, CLIENT_SECRET)
+#
+# Nothing has to be pasted into a chat transcript — create the files yourself.
+# ---------------------------------------------------------------------------
+_TOKEN_FILE = os.path.join(os.path.dirname(__file__), ".bearer_token")
+_CREDS_FILE = os.path.join(os.path.dirname(__file__), ".keycloak_creds")
+
+KEYCLOAK_URL = os.getenv("AWARE_KEYCLOAK_URL", "https://auth.qa2.awareidentity.com")
+KEYCLOAK_REALM = os.getenv("AWARE_KEYCLOAK_REALM", "test02")
+KEYCLOAK_CLIENT_ID = os.getenv("AWARE_KEYCLOAK_CLIENT_ID", "awareness-portal-service")
+KEYCLOAK_CLIENT_SECRET = os.getenv("AWARE_KEYCLOAK_CLIENT_SECRET", "")
+AWARE_USERNAME = os.getenv("AWARE_USERNAME", "")
+AWARE_PASSWORD = os.getenv("AWARE_PASSWORD", "")
+
+
+def _read_creds_file():
+    """Parse tests/.keycloak_creds (KEY=VALUE lines) into a dict; {} if absent."""
+    if not os.path.exists(_CREDS_FILE):
+        return {}
+    creds = {}
+    with open(_CREDS_FILE, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            creds[k.strip().upper()] = v.strip()
+    return creds
+
+
+def _static_bearer_token():
+    tok = os.getenv("AWARE_BEARER_TOKEN", "").strip()
+    if tok:
+        return tok
+    if os.path.exists(_TOKEN_FILE):
+        with open(_TOKEN_FILE, "r", encoding="utf-8") as fh:
+            return fh.read().strip()
+    return ""
+
+
+def _fetch_bearer_token():
+    """Mint a fresh access token via Keycloak password grant. '' if no creds."""
+    static = _static_bearer_token()
+    if static:
+        return static
+
+    creds = _read_creds_file()
+    username = AWARE_USERNAME or creds.get("USERNAME", "")
+    password = AWARE_PASSWORD or creds.get("PASSWORD", "")
+    has_client_creds = bool(creds.get("CLIENT_SECRET", KEYCLOAK_CLIENT_SECRET))
+    # Need either a user login (password grant) or a client secret (client_credentials).
+    if not (username and password) and not has_client_creds:
+        return ""
+
+    client_id = creds.get("CLIENT_ID", KEYCLOAK_CLIENT_ID)
+    client_secret = creds.get("CLIENT_SECRET", KEYCLOAK_CLIENT_SECRET)
+    realm = creds.get("REALM", KEYCLOAK_REALM)
+
+    url = f"{KEYCLOAK_URL}/realms/{realm}/protocol/openid-connect/token"
+
+    # password grant if a user login is supplied, else client_credentials.
+    if username and password:
+        data = {
+            "grant_type": "password",
+            "client_id": client_id,
+            "username": username,
+            "password": password,
+            "scope": "openid",
+        }
+        if client_secret:
+            data["client_secret"] = client_secret
+    else:
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+
+    resp = _requests_module.post(url, data=data, timeout=20)
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"Keycloak token request failed ({resp.status_code}): {resp.text[:300]}"
+        )
+    return resp.json()["access_token"]
 
 # Minimal 1×1 gray-pixel JPEG — satisfies structural validation but is not a face.
 # Only use this for tests that expect non-200 responses (validation/auth/policy errors).
@@ -130,6 +223,32 @@ def mismatched_account_headers():
 @pytest.fixture(scope="session")
 def second_api_key():
     return API_KEY_2
+
+
+@pytest.fixture(scope="session")
+def bearer_token():
+    """Keycloak/OIDC bearer token for JWT-gated endpoints, minted once per session.
+
+    Resolves a ready token (AWARE_BEARER_TOKEN / tests/.bearer_token) or, failing
+    that, performs a Keycloak password grant from AWARE_USERNAME+AWARE_PASSWORD or
+    tests/.keycloak_creds. Skips the test if no credentials are configured."""
+    token = _fetch_bearer_token()
+    if not token:
+        pytest.skip(
+            "No bearer token/credentials. Provide one of: AWARE_BEARER_TOKEN, "
+            "tests/.bearer_token, AWARE_USERNAME+AWARE_PASSWORD, or tests/.keycloak_creds "
+            "to run JWT-gated endpoints (data-retention-policy, security-settings)."
+        )
+    return token
+
+
+@pytest.fixture(scope="session")
+def bearer_headers(bearer_token):
+    """Authorization: Bearer headers for endpoints behind the Istio JWT filter."""
+    return {
+        "Authorization": f"Bearer {bearer_token}",
+        "Content-Type": "application/json",
+    }
 
 
 @pytest.fixture(scope="session")

@@ -89,7 +89,7 @@ class TestCreateHappyPath:
 
     def test_created_by_is_optional(self, base_url, auth_headers, tenant_id, collection_id):
         """POST without createdBy succeeds — createdBy is optional per spec."""
-        payload = {"biometricCredential": {"externalUserId": f"user-{uuid.uuid4().hex[:8]}", "biometrics": {}}}
+        payload = create_credential_payload()
         resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
         assert resp.status_code == 201
         requests.delete(
@@ -114,7 +114,7 @@ class TestCreateCorrelationId:
 
     def test_correlation_id_omitted_when_not_supplied(self, base_url, auth_headers, tenant_id, collection_id):
         """correlationId is omitted from the response when not supplied (spec: omitted when null)."""
-        payload = {"biometricCredential": {"externalUserId": f"user-{uuid.uuid4().hex[:8]}", "biometrics": {}}}
+        payload = create_credential_payload()
         resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
         assert resp.status_code == 201
         cred = resp.json()["biometricCredential"]
@@ -126,11 +126,7 @@ class TestCreateCorrelationId:
 
     def test_correlation_id_null_omitted_from_response(self, base_url, auth_headers, tenant_id, collection_id):
         """Explicitly supplying correlationId:null is treated as absent — field omitted from response."""
-        payload = {"biometricCredential": {
-            "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
-            "biometrics": {},
-            "correlationId": None,
-        }}
+        payload = create_credential_payload(correlationId=None)
         resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
         assert resp.status_code == 201
         cred = resp.json()["biometricCredential"]
@@ -139,6 +135,17 @@ class TestCreateCorrelationId:
                 f"correlationId must be absent when explicitly null, got {cred.get('correlationId')!r}"
         finally:
             requests.delete(credential_url(base_url, tenant_id, collection_id, cred["id"]), headers=auth_headers)
+
+    def test_xss_in_correlation_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """XSS payload in correlationId is rejected with 400."""
+        payload = create_credential_payload(correlationId="<script>alert(1)</script>")
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
+        assert resp.status_code == 400
 
 
 class TestCreateCreatedByValidation:
@@ -216,6 +223,61 @@ class TestCreateCreatedByValidation:
         assert resp.status_code == 400
 
 
+class TestCreateLabelValidation:
+    """Labels within biometrics entries must pass content validation if supplied."""
+
+    def test_xss_in_label_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """XSS payload as a label value is rejected with 400."""
+        payload = {
+            "biometricCredential": {
+                "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
+                "biometrics": {"face": [{"data": _DUMMY_IMAGE_B64, "labels": ["<script>alert(1)</script>"]}]},
+                "createdBy": "probe@test.com",
+            }
+        }
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
+        assert resp.status_code == 400
+
+    def test_sql_injection_in_label_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """SQL injection payload as a label value is rejected with 400."""
+        payload = {
+            "biometricCredential": {
+                "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
+                "biometrics": {"face": [{"data": _DUMMY_IMAGE_B64, "labels": ["' OR 1=1 --"]}]},
+                "createdBy": "probe@test.com",
+            }
+        }
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
+        assert resp.status_code == 400
+
+    def test_empty_string_label_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """Empty string in the labels array is rejected with 400."""
+        payload = {
+            "biometricCredential": {
+                "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
+                "biometrics": {"face": [{"data": _DUMMY_IMAGE_B64, "labels": [""]}]},
+                "createdBy": "probe@test.com",
+            }
+        }
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
+        assert resp.status_code == 400
+
+
 class TestCreateConflict:
 
     def test_duplicate_external_user_id_returns_409(self, base_url, auth_headers, tenant_id, collection_id):
@@ -281,8 +343,7 @@ class TestCreateValidation:
 
     def test_empty_biometrics_map_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
         """POST with an empty biometrics map returns 400 VALIDATION_FAILED.
-        Spec: 'At least one modality key with at least one entry is required.'
-        [BUG] Live API currently accepts {} and returns 201 — MUST FAIL until fixed."""
+        Spec: 'At least one modality key with at least one entry is required.'"""
         payload = {"biometricCredential": {"externalUserId": f"user-{uuid.uuid4().hex[:8]}", "biometrics": {}}}
         resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
         # Clean up if the (buggy) API created the credential anyway.
@@ -323,6 +384,64 @@ class TestCreateValidation:
         assert resp.status_code == 400
         assert resp.json().get("error") == "VALIDATION_FAILED"
 
+    def test_null_data_in_biometrics_entry_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """data:null is rejected with 400 (previously crashed with 500 'Envelope encryption failed')."""
+        payload = {"biometricCredential": {
+            "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
+            "biometrics": {"face": [{"data": None, "labels": ["front"]}]},
+        }}
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
+        assert resp.status_code == 400
+
+    def test_empty_string_data_in_biometrics_entry_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """Empty string data is rejected with 400."""
+        payload = {"biometricCredential": {
+            "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
+            "biometrics": {"face": [{"data": "", "labels": ["front"]}]},
+        }}
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
+        assert resp.status_code == 400
+
+    def test_invalid_base64_chars_in_data_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """Data containing invalid base64 characters (<, >) is rejected with 400."""
+        payload = {"biometricCredential": {
+            "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
+            "biometrics": {"face": [{"data": "<base64 image>", "labels": ["front"]}]},
+        }}
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
+        assert resp.status_code == 400
+
+    def test_non_media_base64_data_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """[BUG] Valid base64 that decodes to plain text ('abcd') must be rejected with 400 — currently returns 201.
+        YWJjZA== is 'abcd' encoded — syntactically valid base64 but not a valid biometric media file
+        (image for face/iris, audio/video for voice). Server must validate decoded content, not just base64 syntax."""
+        payload = {"biometricCredential": {
+            "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
+            "biometrics": {"face": [{"data": "YWJjZA==", "labels": ["front"]}]},
+        }}
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
+        assert resp.status_code == 400
+
     def test_validation_error_includes_field_errors(self, base_url, auth_headers, tenant_id, collection_id):
         """400 VALIDATION_FAILED body includes a fieldErrors map.
         """
@@ -337,11 +456,8 @@ class TestCreateValidation:
 class TestCreateExternalUserId:
 
     def test_special_chars_in_external_user_id_accepted(self, base_url, auth_headers, tenant_id, collection_id):
-        """externalUserId is an opaque identifier — spaces and symbols are accepted (no format constraint)."""
-        payload = {"biometricCredential": {
-            "externalUserId": "user with spaces & symbols!",
-            "biometrics": {},
-        }}
+        """externalUserId accepts email-format identifiers (common in production use)."""
+        payload = create_credential_payload("jane.doe@example.com")
         resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
         assert resp.status_code == 201
         requests.delete(
@@ -352,7 +468,7 @@ class TestCreateExternalUserId:
     def test_long_external_user_id_accepted(self, base_url, auth_headers, tenant_id, collection_id):
         """A 500-character externalUserId is accepted — no length limit is enforced."""
         long_id = f"u-{'x' * 498}"
-        payload = {"biometricCredential": {"externalUserId": long_id, "biometrics": {}}}
+        payload = create_credential_payload(long_id)
         resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
         assert resp.status_code == 201
         assert resp.json()["biometricCredential"]["externalUserId"] == long_id
@@ -360,6 +476,46 @@ class TestCreateExternalUserId:
             credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
             headers=auth_headers,
         )
+
+
+class TestCreateExternalUserIdSecurity:
+    """externalUserId injection-class payloads — each should be rejected with 400."""
+
+    def _post(self, base_url, auth_headers, tenant_id, collection_id, external_user_id):
+        payload = {
+            "biometricCredential": {
+                "externalUserId": external_user_id,
+                "biometrics": {},
+                "createdBy": "probe@test.com",
+            }
+        }
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
+        return resp
+
+    def test_xss_in_external_user_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """XSS payload in externalUserId is rejected with 400."""
+        resp = self._post(base_url, auth_headers, tenant_id, collection_id, "<script>alert(1)</script>")
+        assert resp.status_code == 400
+
+    def test_sql_injection_in_external_user_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """SQL injection payload in externalUserId is rejected with 400."""
+        resp = self._post(base_url, auth_headers, tenant_id, collection_id, "' OR '1'='1")
+        assert resp.status_code == 400
+
+    def test_path_traversal_in_external_user_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """Path traversal payload in externalUserId is rejected with 400."""
+        resp = self._post(base_url, auth_headers, tenant_id, collection_id, "../../etc/passwd")
+        assert resp.status_code == 400
+
+    def test_null_byte_in_external_user_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """Null byte in externalUserId is rejected with 400."""
+        resp = self._post(base_url, auth_headers, tenant_id, collection_id, "user\x00admin")
+        assert resp.status_code == 400
 
 
 class TestCreateNotFound:
@@ -392,14 +548,13 @@ class TestCreateServerManagedFields:
     _FAKE_TS = 1000000000000
 
     def _post_with_server_fields(self, base_url, auth_headers, tenant_id, collection_id):
-        payload = {"biometricCredential": {
-            "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
-            "biometrics": {},
-            "id": self._FAKE_ID,
-            "createdAt": self._FAKE_TS,
-            "updatedAt": self._FAKE_TS,
-            "updatedBy": "attacker@evil.com",
-        }}
+        payload = create_credential_payload(
+            f"user-{uuid.uuid4().hex[:8]}",
+            id=self._FAKE_ID,
+            createdAt=self._FAKE_TS,
+            updatedAt=self._FAKE_TS,
+            updatedBy="attacker@evil.com",
+        )
         resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
         assert resp.status_code == 201, f"Setup failed: {resp.text}"
         return resp.json()["biometricCredential"]
@@ -432,12 +587,6 @@ class TestCreateServerManagedFields:
 
 
 class TestCreateMalformedBody:
-    """
-    [BUG TICKET 1] Malformed/invalid request bodies currently return 500.
-    Spring exception handlers for HttpMessageNotReadableException and
-    HttpMediaTypeNotSupportedException are not mapped — exceptions bubble up as 500.
-    All cases below must fail until those handlers are added.
-    """
 
     def test_envelope_as_array_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
         """biometricCredential value is an array instead of an object — must return 400, not 500."""
@@ -478,6 +627,46 @@ class TestCreateMalformedBody:
             data=b"",
             headers=headers,
         )
+        assert resp.status_code == 400
+
+    def test_unknown_biometrics_key_with_string_value_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """biometrics map with a string value for an unknown modality key must return 400.
+        The biometrics map is typed Map<String, List<EntryRequest>> — a string value cannot
+        be deserialized as a List and would previously cause an unhandled JsonMappingException."""
+        payload = {
+            "biometricCredential": {
+                "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
+                "biometrics": {
+                    "face": [{"data": _DUMMY_IMAGE_B64}],
+                    "unknownField": "value",
+                },
+                "createdBy": "probe@test.com",
+            }
+        }
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
+        assert resp.status_code == 400
+
+    def test_known_biometrics_key_with_string_value_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """biometrics map with a string value for a known modality key (face) must return 400.
+        The crash is type-driven, not key-driven — 'face': 'not-an-array' triggers the same
+        JsonMappingException as an unknown key."""
+        payload = {
+            "biometricCredential": {
+                "externalUserId": f"user-{uuid.uuid4().hex[:8]}",
+                "biometrics": {"face": "not-an-array"},
+            }
+        }
+        resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
+        if resp.status_code == 201:
+            requests.delete(
+                credential_url(base_url, tenant_id, collection_id, resp.json()["biometricCredential"]["id"]),
+                headers=auth_headers,
+            )
         assert resp.status_code == 400
 
 
@@ -548,7 +737,7 @@ class TestCreateCreatedByDefault:
 
     def test_created_by_defaults_to_system_when_omitted(self, base_url, auth_headers, tenant_id, collection_id):
         """Omitting createdBy results in createdBy='system' in the stored credential."""
-        payload = {"biometricCredential": {"externalUserId": f"user-{uuid.uuid4().hex[:8]}", "biometrics": {}}}
+        payload = create_credential_payload()
         resp = requests.post(credential_url(base_url, tenant_id, collection_id), json=payload, headers=auth_headers)
         assert resp.status_code == 201
         cred = resp.json()["biometricCredential"]

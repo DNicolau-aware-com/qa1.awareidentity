@@ -1,6 +1,6 @@
 # Collections API — Test Report
 
-**Date:** 2026-06-16
+**Date:** 2026-06-16 (updated 2026-06-25)
 **Environment:** QA1 — https://api.qa1.awareidentity.com
 **Tenant A (primary):** test01 (`3d95a209-5011-446c-bf7f-34217e7a31f6`)
 **Tenant B (isolation):** testtest1 (`efd53128-7c95-47c3-bf7b-2f86d00848f0`)
@@ -11,16 +11,17 @@
 
 | | Count |
 |---|---|
-| Total tests | 141 |
-| Passed | 102 |
-| Failed | 38 |
+| Total tests | 176 |
+| Passed (last run) | 102 |
+| Expected failures (bugs) | 45+ |
 | Skipped | 1 |
 
-> All 38 failures are **intentional bug trackers**. They assert the correct expected behavior and will pass automatically once the underlying bug is fixed. 
+> All intentional bug-tracker tests assert the correct expected behavior and will pass automatically once the underlying bug is fixed.
+> The 35 new tests added 2026-06-25 have not yet been run against QA1.
 
 ---
 
-## Results by file
+## Results by file (last run — 141 tests)
 
 | File | Passed | Failed | Skipped |
 |---|---|---|---|
@@ -335,6 +336,33 @@ PATCH /v3/tenants/{tenantId}/collections/{id}
 ```
 
 > Contrast: `storageType: "STANDARD"` and `storageType: "PREMIUM"` both return 400 STORAGE_TYPE_IMMUTABLE correctly. Only `null` slips through.
+
+---
+
+### NEW — BUG-12 — Control characters (`\n`, `\t`) in `createdBy` / `updatedBy` accepted
+**Expected failures: 4 tests** | Endpoints: POST, PATCH
+
+`PATTERN_NAME_OR_EMAIL` uses `\s` as its word-separator token (`(\\s[\\p{L}\\p{N}_.+\\-]+)*`).  
+Java's `\s` matches `\n` and `\t`, so `"admin\ninjected"` satisfies the pattern and is accepted with 201/200.  
+Same root cause as credentials BUG-3.
+
+| Failing test |
+|---|
+| `test_create.py::TestCreateValidation::test_newline_in_created_by_returns_400` |
+| `test_create.py::TestCreateValidation::test_tab_in_created_by_returns_400` |
+| `test_update.py::TestUpdateValidation::test_newline_in_updated_by_returns_400` |
+| `test_update.py::TestUpdateValidation::test_tab_in_updated_by_returns_400` |
+
+**Fix:** Replace `\s` with `[ ]` (literal space) in the pattern, or add `(?!.*[\n\t])` as a leading negative lookahead.
+
+---
+
+### NEW — BUG-13 — Missing `X-Aware-AccountId` WWW-Authenticate header blocked by BUG-1
+**Expected failure: 1 test** | Endpoint: GET /collections
+
+`test_auth.py::TestCollectionsWwwAuthenticate::test_missing_account_id_returns_www_authenticate_header`  
+fails because BUG-1 causes the server to return 500 before any auth logic runs, so the `WWW-Authenticate` header is never set.  
+This test will auto-pass when BUG-1 is resolved.
 
 ---
 

@@ -1,0 +1,638 @@
+openapi: 3.0.3
+info:
+  title: Aware Tenant Service — Tenant Preferences API (Internal)
+  version: "1.0.0"
+  description: |
+    Tenant-preference endpoints that are **internal to tenant-service** — they are NOT
+    proxied by the awareness-portal BFF and are not reachable by the portal frontend.
+    Two groups:
+
+      * **Generic preferences** — low-level CRUD over the `tenant_pref` table. Each row
+        holds ONE simple value addressed by `(key, subKey)`; a settings group is all
+        rows sharing the same `key`. `POST` creates (409 if the subKey already exists);
+        `PUT` on the key bulk-upserts a whole group; `PUT` on a subKey upserts one row.
+      * **Individual field accessors** — single-field read/write for the typed layers
+        (`data-retention-policy/{category|saltLogsToRemovePii}` and
+        `security-settings/{field}`). The bulk/typed forms of these layers are the
+        external API — see `tenantpref-external.openapi.yaml`.
+
+    Presence is an invariant: every typed-layer field is seeded at tenant creation, so a
+    `GET` of a missing/corrupt row surfaces as an integrity error (HTTP 500) rather than
+    being masked behind a default.
+servers:
+  - url: https://api.{cluster}.awareidentity.com
+    description: Aware platform environment
+    variables:
+      cluster:
+        default: dev5
+        description: Cluster name (e.g. dev5, qa1, demo)
+
+security:
+  - ApiKeyAuth: []
+    AccountIdAuth: []
+
+paths:
+  # ── Generic preferences ─────────────────────────────────────────────────────
+
+  /v3/tenants/{tenantId}/preferences:
+    get:
+      operationId: listTenantPreferences
+      summary: List all preference rows for a tenant.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: All preference rows for the tenant (empty array if none).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TenantPreferenceResponse'
+
+  /v3/tenants/{tenantId}/preferences/{key}:
+    get:
+      operationId: listTenantPreferencesByKey
+      summary: List all rows in one settings group (by key).
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Key'
+      responses:
+        '200':
+          description: All rows sharing the key (empty array if the group has none).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TenantPreferenceResponse'
+    put:
+      operationId: upsertTenantPreferences
+      summary: Bulk create-or-update every sub-setting in a group, in one transaction.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Key'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/TenantPreferenceGroupEntryRequest'
+            example:
+              - subKey: session_timeout_minutes
+                value: "60"
+                valueType: INTEGER
+              - subKey: password_reset_link_lifetime
+                value: "30"
+                valueType: INTEGER
+      responses:
+        '200':
+          description: The resulting rows for the group after the upsert.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TenantPreferenceResponse'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /v3/tenants/{tenantId}/preferences/{key}/{subKey}:
+    get:
+      operationId: getTenantPreference
+      summary: Get a single preference value by (key, subKey).
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Key'
+        - $ref: '#/components/parameters/SubKey'
+      responses:
+        '200':
+          description: The preference row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantPreferenceResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createTenantPreference
+      summary: Create a single preference value (409 if the subKey already exists).
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Key'
+        - $ref: '#/components/parameters/SubKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantPreferenceValueRequest'
+            example:
+              value: "60"
+              valueType: INTEGER
+      responses:
+        '201':
+          description: The created row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantPreferenceResponse'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    put:
+      operationId: upsertTenantPreference
+      summary: Create or update a single preference value by (key, subKey).
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Key'
+        - $ref: '#/components/parameters/SubKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantPreferenceValueRequest'
+            example:
+              value: "60"
+              valueType: INTEGER
+      responses:
+        '200':
+          description: The created or updated row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantPreferenceResponse'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+    delete:
+      operationId: deleteTenantPreference
+      summary: Delete a single preference row by (key, subKey).
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Key'
+        - $ref: '#/components/parameters/SubKey'
+      responses:
+        '204':
+          description: Preference deleted.
+
+  # ── Data retention: individual category fields ──────────────────────────────
+
+  /v3/tenants/{tenantId}/data-retention-policy/templates:
+    get:
+      operationId: getTemplatesRetention
+      summary: Get the retention settings for the Biometric Templates category.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: Retention settings for templates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataTypeRetention'
+    put:
+      operationId: updateTemplatesRetention
+      summary: Update the retention settings for the Biometric Templates category.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DataTypeRetention'
+            example:
+              maxRetentionDays: 365
+              autoDeleteExpired: true
+              modalities: { Face: 365, Voice: 36, Iris: 365, Fingerprint: 365 }
+      responses:
+        '200':
+          description: The saved category settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataTypeRetention'
+        '400':
+          $ref: '#/components/responses/SettingsInvalid'
+
+  /v3/tenants/{tenantId}/data-retention-policy/enrollmentImages:
+    get:
+      operationId: getEnrollmentImagesRetention
+      summary: Get the retention settings for the Enrollment Images category.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: Retention settings for enrollment images.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataTypeRetention'
+    put:
+      operationId: updateEnrollmentImagesRetention
+      summary: Update the retention settings for the Enrollment Images category.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DataTypeRetention'
+            example:
+              maxRetentionDays: 90
+              autoDeleteExpired: true
+              modalities: { Face: 90, Voice: 90, Iris: 90, Fingerprint: 90 }
+      responses:
+        '200':
+          description: The saved category settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataTypeRetention'
+        '400':
+          $ref: '#/components/responses/SettingsInvalid'
+
+  /v3/tenants/{tenantId}/data-retention-policy/logs:
+    get:
+      operationId: getLogsRetention
+      summary: Get the retention settings for the Transaction Logs category.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: Retention settings for logs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataTypeRetention'
+    put:
+      operationId: updateLogsRetention
+      summary: Update the retention settings for the Transaction Logs category.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DataTypeRetention'
+            example:
+              maxRetentionDays: 30
+              autoDeleteExpired: true
+              modalities: { Face: 30, Voice: 30, Iris: 30, Fingerprint: 30 }
+      responses:
+        '200':
+          description: The saved category settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataTypeRetention'
+        '400':
+          $ref: '#/components/responses/SettingsInvalid'
+
+  /v3/tenants/{tenantId}/data-retention-policy/saltLogsToRemovePii:
+    get:
+      operationId: getSaltLogsToRemovePii
+      summary: Get the "salt logs to remove PII" flag.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: The current flag value.
+          content:
+            application/json:
+              schema:
+                type: boolean
+              example: false
+    put:
+      operationId: updateSaltLogsToRemovePii
+      summary: Set the "salt logs to remove PII" flag.
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: boolean
+            example: true
+      responses:
+        '200':
+          description: The saved flag value.
+          content:
+            application/json:
+              schema:
+                type: boolean
+
+  # ── Security settings: individual fields ────────────────────────────────────
+
+  /v3/tenants/{tenantId}/security-settings/session_timeout_minutes:
+    get:
+      operationId: getSessionTimeout
+      summary: Get the idle session timeout (minutes).
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: The current session timeout in minutes.
+          content:
+            application/json:
+              schema:
+                type: integer
+                minimum: 1
+              example: 30
+    put:
+      operationId: updateSessionTimeout
+      summary: Set the idle session timeout (minutes).
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: integer
+              minimum: 1
+            example: 60
+      responses:
+        '200':
+          description: The saved session timeout in minutes.
+          content:
+            application/json:
+              schema:
+                type: integer
+        '400':
+          $ref: '#/components/responses/SettingsInvalid'
+
+  /v3/tenants/{tenantId}/security-settings/password_reset_link_lifetime:
+    get:
+      operationId: getPasswordResetLinkLifetime
+      summary: Get the password-reset link lifetime (minutes).
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: The current password-reset link lifetime in minutes.
+          content:
+            application/json:
+              schema:
+                type: integer
+                minimum: 1
+              example: 1440
+    put:
+      operationId: updatePasswordResetLinkLifetime
+      summary: Set the password-reset link lifetime (minutes).
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: integer
+              minimum: 1
+            example: 1440
+      responses:
+        '200':
+          description: The saved password-reset link lifetime in minutes.
+          content:
+            application/json:
+              schema:
+                type: integer
+        '400':
+          $ref: '#/components/responses/SettingsInvalid'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Aware-ApiKey
+      description: Aware-issued API key.
+    AccountIdAuth:
+      type: apiKey
+      in: header
+      name: X-Aware-AccountId
+      description: Aware account identifier associated with the API key.
+
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      description: UUID of the tenant.
+      schema:
+        type: string
+        format: uuid
+    Key:
+      name: key
+      in: path
+      required: true
+      description: Preference key (settings group). Slug of letters, digits, '_' or '-'.
+      schema:
+        type: string
+        maxLength: 128
+        pattern: '^[A-Za-z0-9_-]+$'
+      example: security_settings
+    SubKey:
+      name: subKey
+      in: path
+      required: true
+      description: Preference sub-key (the individual setting within a group).
+      schema:
+        type: string
+        maxLength: 128
+        pattern: '^[A-Za-z0-9_-]+$'
+      example: session_timeout_minutes
+
+  responses:
+    NotFound:
+      description: Preference not found for this tenant. error `NOT_FOUND`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: 2026-06-25T10:15:30
+            status: 404
+            error: NOT_FOUND
+            message: "Tenant preference not found for key 'security_settings' subKey 'session_timeout_minutes'"
+    Conflict:
+      description: A preference with this (key, subKey) already exists. error `CONFLICT`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: 2026-06-25T10:15:30
+            status: 409
+            error: CONFLICT
+            message: "Preference 'security_settings/session_timeout_minutes' already exists for this tenant"
+    ValidationFailed:
+      description: Structural request validation failed. error `VALIDATION_FAILED`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: 2026-06-25T10:15:30
+            status: 400
+            error: VALIDATION_FAILED
+            message: Validation failed
+            fieldErrors:
+              value: Value is required
+    SettingsInvalid:
+      description: |
+        Request rejected. Either structural validation (`VALIDATION_FAILED`) or a
+        business rule for the settings layer (`SETTINGS_INVALID`) — e.g. a retention
+        category exceeds the system ceiling, a modality exceeds its category max, or a
+        non-positive minutes value.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            settingsInvalid:
+              value:
+                timestamp: 2026-06-25T10:15:30
+                status: 400
+                error: SETTINGS_INVALID
+                message: "Voice retention for Biometric Templates (400 days) exceeds the category maximum of 365 days."
+            validationFailed:
+              value:
+                timestamp: 2026-06-25T10:15:30
+                status: 400
+                error: VALIDATION_FAILED
+                message: Validation failed
+                fieldErrors:
+                  maxRetentionDays: must be greater than or equal to 1
+
+  schemas:
+    PreferenceValueType:
+      type: string
+      description: How to interpret a preference value stored as text.
+      enum: [STRING, INTEGER, BOOLEAN, JSON]
+
+    # ── Generic preferences ───────────────────────────────────────────────────
+
+    TenantPreferenceGroupEntryRequest:
+      type: object
+      description: One entry of a bulk group upsert (PUT .../preferences/{key}).
+      required: [subKey, value]
+      properties:
+        subKey:
+          type: string
+          maxLength: 128
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: The individual setting within the group.
+          example: session_timeout_minutes
+        value:
+          type: string
+          description: The stored value, as text (a JSON document for valueType JSON).
+          example: "60"
+        valueType:
+          $ref: '#/components/schemas/PreferenceValueType'
+
+    TenantPreferenceValueRequest:
+      type: object
+      description: Body for creating/upserting a single preference value.
+      required: [value]
+      properties:
+        value:
+          type: string
+          description: The stored value, as text (a JSON document for valueType JSON).
+          example: "60"
+        valueType:
+          $ref: '#/components/schemas/PreferenceValueType'
+
+    TenantPreferenceResponse:
+      type: object
+      required: [id, tenantId, key, subKey, value]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+          description: Owning account, when the preference is account-scoped. Omitted when null.
+        key:
+          type: string
+          example: security_settings
+        subKey:
+          type: string
+          example: session_timeout_minutes
+        value:
+          type: string
+          example: "30"
+        valueType:
+          $ref: '#/components/schemas/PreferenceValueType'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # ── Data retention category ─────────────────────────────────────────────────
+
+    DataTypeRetention:
+      type: object
+      description: Retention settings for a single data category (templates, enrollment images, logs).
+      required: [maxRetentionDays, autoDeleteExpired, modalities]
+      properties:
+        maxRetentionDays:
+          type: integer
+          minimum: 1
+          description: Tenant-chosen ceiling for this category. Bounded by the system maximum.
+          example: 365
+        autoDeleteExpired:
+          type: boolean
+          description: Whether data past its retention period is automatically deleted.
+        modalities:
+          type: object
+          description: Per-modality retention (days), keyed by modality name. Each value is 0 … maxRetentionDays.
+          additionalProperties:
+            type: integer
+          example: { Face: 365, Voice: 365, Iris: 365, Fingerprint: 365 }
+
+    # ── Error ─────────────────────────────────────────────────────────────────
+
+    Error:
+      type: object
+      required: [status, message]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp of the error.
+        status:
+          type: integer
+          description: HTTP status code.
+        error:
+          type: string
+          description: |
+            Machine-readable error code (or the HTTP reason phrase for unmapped 5xx).
+
+            | Code | HTTP | Description |
+            |------|------|-------------|
+            | `VALIDATION_FAILED` | 400 | Missing or invalid request fields |
+            | `SETTINGS_INVALID` | 400 | A settings-layer business rule failed |
+            | `NOT_FOUND` | 404 | Preference not found for this tenant |
+            | `CONFLICT` | 409 | Sub-key already exists (create) |
+        message:
+          type: string
+          description: Human-readable error message.
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string
+          description: Per-field validation errors. Omitted when null.

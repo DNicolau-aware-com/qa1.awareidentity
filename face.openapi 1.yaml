@@ -33,6 +33,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FaceLivenessResponse'
+        '401':
+          description: |
+            Authentication failed. Returned when the `X-Aware-ApiKey` header is absent,
+            empty, or contains an unrecognized key value. Per RFC 7235, the response
+            includes a `WWW-Authenticate` header indicating the required scheme.
+
+            **Implementation note:** the current server returns `403` for this case
+            instead of `401`. This is a known deviation from RFC 7235 semantics; the
+            spec documents the intended contract. Clients should handle both `401` and
+            `403` until the implementation is corrected.
+          headers:
+            WWW-Authenticate:
+              description: 'Indicates the authentication scheme required. Example: `ApiKey realm="aware"`'
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: |
+            Authorization failed. The supplied `X-Aware-ApiKey` is valid but the
+            `X-Aware-AccountId` header does not match the account the key is issued for.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: |
             A referenced resource was not found. Either the account is unknown, or a
@@ -109,6 +136,33 @@ paths:
                       correlationID: "ABCDE-003498S"
                       timestamp: 1779331664576
                       transactionID: "aec9969f-aa5c-4038-aee4-f442f68f93b7"
+        '401':
+          description: |
+            Authentication failed. Returned when the `X-Aware-ApiKey` header is absent,
+            empty, or contains an unrecognized key value. Per RFC 7235, the response
+            includes a `WWW-Authenticate` header indicating the required scheme.
+
+            **Implementation note:** the current server returns `403` for this case
+            instead of `401`. This is a known deviation from RFC 7235 semantics; the
+            spec documents the intended contract. Clients should handle both `401` and
+            `403` until the implementation is corrected.
+          headers:
+            WWW-Authenticate:
+              description: 'Indicates the authentication scheme required. Example: `ApiKey realm="aware"`'
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: |
+            Authorization failed. The supplied `X-Aware-ApiKey` is valid but the
+            `X-Aware-AccountId` header does not match the account the key is issued for.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: |
             A referenced resource was not found. Either the account is unknown, or a

@@ -230,8 +230,7 @@ class TestGetByIdNotFound:
             requests.delete(collection_url(base_url, tenant_id, other_coll_id), headers=auth_headers)
 
     def test_non_uuid_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
-        """GET with a non-UUID credentialId returns 400 VALIDATION_FAILED.
-        Spec: non-UUID path variable → VALIDATION_FAILED. [BUG] Currently 500/error field — MUST FAIL until fixed."""
+        """GET with a non-UUID credentialId returns 400 VALIDATION_FAILED."""
         resp = requests.get(
             credential_url(base_url, tenant_id, collection_id, "not-a-uuid"),
             headers=auth_headers,

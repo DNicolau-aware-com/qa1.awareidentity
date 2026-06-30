@@ -18,7 +18,7 @@ def collection_url(base_url, tenant_id, collection_id=None):
 def create_payload(name=None, **overrides):
     inner = {
         "name": name or f"test-collection-{uuid.uuid4().hex[:8]}",
-        "storageType": "STANDARD",
+        "storageType": "CLOUD",
         "createdBy": "test@aware.com",
     }
     inner.update(overrides)

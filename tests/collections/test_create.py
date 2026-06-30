@@ -31,9 +31,9 @@ class TestCreateHappyPath:
         """id is a valid UUID."""
         uuid.UUID(new_collection["id"])
 
-    def test_storage_type_is_standard(self, base_url, auth_headers, tenant_id, new_collection):
-        """storageType is STANDARD."""
-        assert new_collection["storageType"] == "STANDARD"
+    def test_storage_type_matches_request(self, base_url, auth_headers, tenant_id, new_collection):
+        """storageType in response matches the value sent in the request (CLOUD)."""
+        assert new_collection["storageType"] == "CLOUD"
 
     def test_tenant_id_matches_path(self, base_url, auth_headers, tenant_id, new_collection):
         """tenantId in response matches the tenantId in the URL path."""
@@ -86,7 +86,7 @@ class TestCreateValidation:
     def test_missing_envelope_returns_400(self, base_url, auth_headers, tenant_id):
         """POST without biometricCollection wrapper returns 400."""
         resp = requests.post(collection_url(base_url, tenant_id),
-                             json={"name": "x", "storageType": "STANDARD", "createdBy": "x"},
+                             json={"name": "x", "storageType": "CLOUD", "createdBy": "x"},
                              headers=auth_headers)
         assert resp.status_code == 400
 
@@ -97,24 +97,24 @@ class TestCreateValidation:
 
     def test_missing_name_returns_400(self, base_url, auth_headers, tenant_id):
         """POST without name returns 400 VALIDATION_FAILED."""
-        payload = {"biometricCollection": {"storageType": "STANDARD", "createdBy": "test@aware.com"}}
+        payload = {"biometricCollection": {"storageType": "CLOUD", "createdBy": "test@aware.com"}}
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
-        assert resp.json().get("errorCode") == "VALIDATION_FAILED"
+        assert resp.json().get("error") == "VALIDATION_FAILED"
 
     def test_blank_name_returns_400(self, base_url, auth_headers, tenant_id):
         """POST with a blank name returns 400 VALIDATION_FAILED."""
-        payload = {"biometricCollection": {"name": "   ", "storageType": "STANDARD", "createdBy": "test@aware.com"}}
+        payload = {"biometricCollection": {"name": "   ", "storageType": "CLOUD", "createdBy": "test@aware.com"}}
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
-        assert resp.json().get("errorCode") == "VALIDATION_FAILED"
+        assert resp.json().get("error") == "VALIDATION_FAILED"
 
     def test_missing_storage_type_returns_400(self, base_url, auth_headers, tenant_id):
         """POST without storageType returns 400 VALIDATION_FAILED."""
         payload = {"biometricCollection": {"name": "Test", "createdBy": "test@aware.com"}}
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
-        assert resp.json().get("errorCode") == "VALIDATION_FAILED"
+        assert resp.json().get("error") == "VALIDATION_FAILED"
 
     def test_invalid_storage_type_returns_400(self, base_url, auth_headers, tenant_id):
         """POST with an unsupported storageType value returns 400."""
@@ -124,37 +124,37 @@ class TestCreateValidation:
 
     def test_missing_created_by_returns_400(self, base_url, auth_headers, tenant_id):
         """POST without createdBy returns 400 VALIDATION_FAILED."""
-        payload = {"biometricCollection": {"name": "Test", "storageType": "STANDARD"}}
+        payload = {"biometricCollection": {"name": "Test", "storageType": "CLOUD"}}
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
-        assert resp.json().get("errorCode") == "VALIDATION_FAILED"
+        assert resp.json().get("error") == "VALIDATION_FAILED"
 
     def test_empty_name_returns_400(self, base_url, auth_headers, tenant_id):
         """POST with empty string name returns 400."""
-        payload = {"biometricCollection": {"name": "", "storageType": "STANDARD", "createdBy": "test@aware.com"}}
+        payload = {"biometricCollection": {"name": "", "storageType": "CLOUD", "createdBy": "test@aware.com"}}
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
 
     def test_empty_created_by_returns_400(self, base_url, auth_headers, tenant_id):
         """POST with empty string createdBy returns 400."""
-        payload = {"biometricCollection": {"name": f"test-{uuid.uuid4().hex[:8]}", "storageType": "STANDARD", "createdBy": ""}}
+        payload = {"biometricCollection": {"name": f"test-{uuid.uuid4().hex[:8]}", "storageType": "CLOUD", "createdBy": ""}}
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
 
     def test_validation_error_includes_field_errors(self, base_url, auth_headers, tenant_id):
         """400 VALIDATION_FAILED body includes a fieldErrors map."""
-        payload = {"biometricCollection": {"storageType": "STANDARD"}}  # missing name + createdBy
+        payload = {"biometricCollection": {"storageType": "CLOUD"}}  # missing name + createdBy
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
         body = resp.json()
-        assert body.get("errorCode") == "VALIDATION_FAILED"
+        assert body.get("error") == "VALIDATION_FAILED"
         assert "fieldErrors" in body
 
     def test_xss_in_created_by_returns_400(self, base_url, auth_headers, tenant_id):
         """createdBy with an XSS payload is rejected — must match PATTERN_NAME_OR_EMAIL."""
         payload = {"biometricCollection": {
             "name": f"test-{uuid.uuid4().hex[:8]}",
-            "storageType": "STANDARD",
+            "storageType": "CLOUD",
             "createdBy": "<script>alert(1)</script>",
         }}
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
@@ -164,7 +164,7 @@ class TestCreateValidation:
         """createdBy with arbitrary symbols is rejected — must match PATTERN_NAME_OR_EMAIL."""
         payload = {"biometricCollection": {
             "name": f"test-{uuid.uuid4().hex[:8]}",
-            "storageType": "STANDARD",
+            "storageType": "CLOUD",
             "createdBy": "user; DROP TABLE tenants;--",
         }}
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
@@ -177,6 +177,111 @@ class TestCreateValidation:
         assert resp.status_code == 201
         requests.delete(collection_url(base_url, tenant_id, resp.json()["biometricCollection"]["id"]),
                         headers=auth_headers)
+
+    def test_whitespace_only_created_by_returns_400(self, base_url, auth_headers, tenant_id):
+        """createdBy with whitespace-only value must be rejected — PATTERN_NAME_OR_EMAIL requires at least one
+        letter or digit at the start. May reveal the same root cause as credentials BUG-3 if accepted."""
+        payload = {"biometricCollection": {
+            "name": f"test-{uuid.uuid4().hex[:8]}",
+            "storageType": "CLOUD",
+            "createdBy": "   ",
+        }}
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+
+    def test_newline_in_created_by_returns_400(self, base_url, auth_headers, tenant_id):
+        """[BUG] createdBy containing a newline must be rejected. PATTERN_NAME_OR_EMAIL uses \\s as its
+        word-separator token; Java's \\s matches \\n, so "admin\\ninjected" satisfies the regex and is
+        accepted. Same root cause as credentials BUG-3. MUST FAIL until the pattern is tightened."""
+        payload = {"biometricCollection": {
+            "name": f"test-{uuid.uuid4().hex[:8]}",
+            "storageType": "CLOUD",
+            "createdBy": "admin\ninjected",
+        }}
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+
+    def test_tab_in_created_by_returns_400(self, base_url, auth_headers, tenant_id):
+        """[BUG] createdBy containing a tab must be rejected. PATTERN_NAME_OR_EMAIL uses \\s as its
+        word-separator token; Java's \\s matches \\t, so "admin\\tinjected" satisfies the regex and is
+        accepted. Same root cause as credentials BUG-3. MUST FAIL until the pattern is tightened."""
+        payload = {"biometricCollection": {
+            "name": f"test-{uuid.uuid4().hex[:8]}",
+            "storageType": "CLOUD",
+            "createdBy": "admin\tinjected",
+        }}
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+
+
+class TestStorageTypeValidation:
+    """storageType must be CLOUD or DECENTRALIZED — STANDARD was removed."""
+
+    def test_cloud_storage_type_returns_201(self, base_url, auth_headers, tenant_id):
+        """storageType=CLOUD is accepted and returned in the response."""
+        resp = requests.post(collection_url(base_url, tenant_id),
+                             json=create_payload(storageType="CLOUD"), headers=auth_headers)
+        assert resp.status_code == 201
+        c = resp.json()["biometricCollection"]
+        assert c["storageType"] == "CLOUD"
+        requests.delete(collection_url(base_url, tenant_id, c["id"]), headers=auth_headers)
+
+    def test_decentralized_storage_type_returns_201(self, base_url, auth_headers, tenant_id):
+        """storageType=DECENTRALIZED is accepted and returned in the response."""
+        resp = requests.post(collection_url(base_url, tenant_id),
+                             json=create_payload(storageType="DECENTRALIZED"), headers=auth_headers)
+        assert resp.status_code == 201
+        c = resp.json()["biometricCollection"]
+        assert c["storageType"] == "DECENTRALIZED"
+        requests.delete(collection_url(base_url, tenant_id, c["id"]), headers=auth_headers)
+
+    def test_standard_storage_type_returns_400(self, base_url, auth_headers, tenant_id):
+        """storageType=STANDARD is no longer valid — must return 400 VALIDATION_FAILED."""
+        payload = {"biometricCollection": {
+            "name": f"test-{uuid.uuid4().hex[:8]}",
+            "storageType": "STANDARD",
+            "createdBy": "test@aware.com",
+        }}
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+        assert resp.json().get("error") == "VALIDATION_FAILED"
+
+    def test_lowercase_cloud_returns_400(self, base_url, auth_headers, tenant_id):
+        """storageType is case-sensitive — lowercase 'cloud' returns 400."""
+        payload = {"biometricCollection": {
+            "name": f"test-{uuid.uuid4().hex[:8]}",
+            "storageType": "cloud",
+            "createdBy": "test@aware.com",
+        }}
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+
+    def test_unknown_storage_type_returns_400(self, base_url, auth_headers, tenant_id):
+        """An unrecognised storageType value returns 400 VALIDATION_FAILED."""
+        payload = {"biometricCollection": {
+            "name": f"test-{uuid.uuid4().hex[:8]}",
+            "storageType": "PREMIUM",
+            "createdBy": "test@aware.com",
+        }}
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+
+    def test_missing_storage_type_returns_400(self, base_url, auth_headers, tenant_id):
+        """Omitting storageType returns 400 VALIDATION_FAILED."""
+        payload = {"biometricCollection": {"name": f"test-{uuid.uuid4().hex[:8]}", "createdBy": "test@aware.com"}}
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+        assert resp.json().get("error") == "VALIDATION_FAILED"
+
+    def test_empty_storage_type_returns_400(self, base_url, auth_headers, tenant_id):
+        """Empty string storageType returns 400 VALIDATION_FAILED."""
+        payload = {"biometricCollection": {
+            "name": f"test-{uuid.uuid4().hex[:8]}",
+            "storageType": "",
+            "createdBy": "test@aware.com",
+        }}
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
 
 
 class TestCreateNameBoundaries:
@@ -231,7 +336,7 @@ class TestCreateServerManagedFields:
     def _post_with_server_fields(self, base_url, auth_headers, tenant_id):
         payload = {"biometricCollection": {
             "name": f"srv-fields-{uuid.uuid4().hex[:8]}",
-            "storageType": "STANDARD",
+            "storageType": "CLOUD",
             "createdBy": "test@aware.com",
             "id": self._FAKE_ID,
             "tenantId": self._FAKE_TENANT_ID,
@@ -295,12 +400,12 @@ class TestCreateConflict:
         """POST with a name already used by this tenant returns 409 CONFLICT."""
         payload = {"biometricCollection": {
             "name": new_collection["name"],
-            "storageType": "STANDARD",
+            "storageType": "CLOUD",
             "createdBy": "test@aware.com",
         }}
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 409
-        assert resp.json().get("errorCode") == "CONFLICT"
+        assert resp.json().get("error") == "CONFLICT"
 
 
 class TestFailedCreateDoesNotPersist:
@@ -313,7 +418,7 @@ class TestFailedCreateDoesNotPersist:
     def test_validation_failure_does_not_persist(self, base_url, auth_headers, tenant_id):
         """A 400 validation failure creates no collection — list returns 0 results for that name."""
         name = f"ghost-validation-{uuid.uuid4().hex[:8]}"
-        payload = {"biometricCollection": {"name": name, "storageType": "STANDARD"}}  # missing createdBy
+        payload = {"biometricCollection": {"name": name, "storageType": "CLOUD"}}  # missing createdBy
         resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
 
@@ -348,3 +453,27 @@ class TestFailedCreateDoesNotPersist:
                 f"Duplicate POST left a second collection: found {list_resp.json()['totalElements']} with name '{name}'"
         finally:
             requests.delete(collection_url(base_url, tenant_id, first_id), headers=auth_headers)
+
+
+class TestErrorResponseShape:
+    """Error responses must carry a machine-readable timestamp."""
+
+    def test_error_response_includes_timestamp(self, base_url, auth_headers, tenant_id):
+        """A 400 error body includes a 'timestamp' field."""
+        payload = {"biometricCollection": {"storageType": "CLOUD"}}  # missing name + createdBy
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+        assert "timestamp" in resp.json(), "Error response must include a 'timestamp' field"
+
+    def test_error_timestamp_is_iso8601(self, base_url, auth_headers, tenant_id):
+        """The timestamp field in a 400 error body is a valid ISO-8601 string."""
+        from datetime import datetime
+        payload = {"biometricCollection": {"storageType": "CLOUD"}}  # missing name + createdBy
+        resp = requests.post(collection_url(base_url, tenant_id), json=payload, headers=auth_headers)
+        assert resp.status_code == 400
+        ts = resp.json().get("timestamp", "")
+        assert ts, "timestamp must be non-empty"
+        try:
+            datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            assert False, f"timestamp {repr(ts)} is not valid ISO-8601"

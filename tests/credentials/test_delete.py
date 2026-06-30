@@ -63,7 +63,7 @@ class TestDeleteByIdSoftDelete:
         user_id = f"user-{uuid.uuid4().hex[:8]}"
         resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": user_id, "biometrics": {}}},
+            json=create_credential_payload(user_id),
             headers=auth_headers,
         )
         assert resp.status_code == 201
@@ -124,8 +124,7 @@ class TestDeleteByIdNotFound:
         assert resp.json().get("error") == "NOT_FOUND"
 
     def test_non_uuid_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
-        """DELETE with a non-UUID credentialId must return 400 VALIDATION_FAILED.
-        Currently returns 500 — MethodArgumentTypeMismatchException unhandled. MUST FAIL until fixed."""
+        """DELETE with a non-UUID credentialId must return 400 VALIDATION_FAILED."""
         resp = requests.delete(
             credential_url(base_url, tenant_id, collection_id, "not-a-uuid"),
             headers=auth_headers,
@@ -142,7 +141,7 @@ class TestDeleteByUserIdHappyPath:
         user_id = f"user-{uuid.uuid4().hex[:8]}"
         resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": user_id, "biometrics": {}}},
+            json=create_credential_payload(user_id),
             headers=auth_headers,
         )
         assert resp.status_code == 201
@@ -158,7 +157,7 @@ class TestDeleteByUserIdHappyPath:
         user_id = f"user-{uuid.uuid4().hex[:8]}"
         resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": user_id, "biometrics": {}}},
+            json=create_credential_payload(user_id),
             headers=auth_headers,
         )
         assert resp.status_code == 201
@@ -183,12 +182,12 @@ class TestDeleteByUserIdHappyPath:
 
         resp_a = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": user_a, "biometrics": {}}},
+            json=create_credential_payload(user_a),
             headers=auth_headers,
         )
         resp_b = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": user_b, "biometrics": {}}},
+            json=create_credential_payload(user_b),
             headers=auth_headers,
         )
         assert resp_a.status_code == 201
@@ -233,7 +232,7 @@ class TestDeleteByIdWrongCollection:
         """DELETE a valid credentialId via a different collectionId returns 404."""
         resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": f"wrong-coll-{uuid.uuid4().hex[:8]}", "biometrics": {}}},
+            json=create_credential_payload(f"wrong-coll-{uuid.uuid4().hex[:8]}"),
             headers=auth_headers,
         )
         assert resp.status_code == 201
@@ -252,16 +251,14 @@ class TestDeleteByIdWrongCollection:
 
 class TestDeleteByUserIdValidation:
 
-    def test_empty_user_id_returns_404(self, base_url, auth_headers, tenant_id, collection_id):
-        """DELETE ?userId= with empty string returns 404 — spec defines no 400 for this case.
-        Empty string is a valid string; server looks for externalUserId='' and finds none."""
+    def test_empty_user_id_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """DELETE ?userId= with empty string returns 400 VALIDATION_FAILED — consistent with PATCH behavior."""
         resp = requests.delete(
             credential_url(base_url, tenant_id, collection_id),
             params={"userId": ""},
             headers=auth_headers,
         )
-        assert resp.status_code == 404
-        assert resp.json().get("error") == "NOT_FOUND"
+        assert resp.status_code == 400
 
     def test_missing_user_id_param_does_not_crash(self, base_url, auth_headers, tenant_id, collection_id):
         """DELETE without ?userId= (required param) must not return 500.

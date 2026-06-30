@@ -19,3 +19,7 @@ htmlcov/
 
 # Environment
 .env
+
+# Secrets — bearer token / Keycloak credentials for JWT-gated test endpoints
+tests/.bearer_token
+tests/.keycloak_creds

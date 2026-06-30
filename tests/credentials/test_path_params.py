@@ -2,11 +2,6 @@
 Malformed path-parameter tests for the credentials endpoints.
 
 Per spec (Error table): a non-UUID path variable must return 400 VALIDATION_FAILED.
-[BUG #4] The service currently returns 500 Internal Server Error for any
-non-UUID / oversized tenantId, collectionId, or credentialId
-(MethodArgumentTypeMismatchException → UUID conversion failure is unhandled).
-These tests MUST FAIL until the bug is fixed.
-
 Origin: discovered via a malformed request where a UUID had extra text appended
 (e.g. `{{tenantId}}tenantId`), yielding "UUID string too large" → 500.
 """

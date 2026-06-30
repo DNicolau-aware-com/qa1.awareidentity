@@ -11,7 +11,7 @@ Per spec:
 import uuid
 import requests
 
-from tests.credentials.conftest import credential_url
+from tests.credentials.conftest import credential_url, create_credential_payload
 
 
 class TestCredentialsAuth:
@@ -179,10 +179,9 @@ class TestCredentialsForbidden:
     def test_account_mismatch_on_post_returns_403(
         self, base_url, mismatched_account_headers, tenant_id, collection_id
     ):
-        payload = {"biometricCredential": {"externalUserId": "user-x", "biometrics": {}}}
         resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json=payload,
+            json=create_credential_payload(),
             headers=mismatched_account_headers,
         )
         assert resp.status_code == 403

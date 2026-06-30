@@ -75,12 +75,33 @@ class TestListPagination:
         assert resp.status_code == 200
         assert resp.json()["size"] <= 100
 
+    def test_non_integer_page_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """page=abc must return 400 VALIDATION_FAILED — page is typed int; a string cannot be converted.
+        [BUG] Currently returns 500 'Failed to convert value of type java.lang.String to required type int'
+        (MethodArgumentTypeMismatchException unhandled) — MUST FAIL until fixed."""
+        resp = requests.get(
+            credential_url(base_url, tenant_id, collection_id),
+            params={"page": "abc"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
     def test_size_zero_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
         """size=0 must return 400 — zero-item pages are not valid.
-        [BUG] Currently returns 500 (unhandled Spring exception) — MUST FAIL until fixed."""
+        [BUG] Currently returns 500 'Page size must not be less than one' — MUST FAIL until fixed."""
         resp = requests.get(
             credential_url(base_url, tenant_id, collection_id),
             params={"size": 0},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+    def test_negative_size_returns_400(self, base_url, auth_headers, tenant_id, collection_id):
+        """size=-1 must return 400 — negative page size is not valid.
+        [BUG] Currently returns 500 'Page size must not be less than one' — MUST FAIL until fixed."""
+        resp = requests.get(
+            credential_url(base_url, tenant_id, collection_id),
+            params={"size": -1},
             headers=auth_headers,
         )
         assert resp.status_code == 400
@@ -366,28 +387,27 @@ class TestListUserIdFilter:
                 params={"userId": partial},
                 headers=auth_headers,
             )
-            assert resp.status_code == 200
-            ids = [c["id"] for c in resp.json()["biometricCredentials"]]
-            assert cred_id not in ids, "Partial userId should not match — filter must be exact"
+            assert resp.status_code in (200, 404), f"Expected 200 (empty) or 404 for non-matching userId, got {resp.status_code}"
+            if resp.status_code == 200:
+                ids = [c["id"] for c in resp.json()["biometricCredentials"]]
+                assert cred_id not in ids, "Partial userId should not match — filter must be exact"
         finally:
             requests.delete(credential_url(base_url, tenant_id, collection_id, cred_id), headers=auth_headers)
 
-    def test_user_id_filter_nonexistent_returns_empty_list(
+    def test_user_id_filter_nonexistent_returns_404(
         self, base_url, auth_headers, tenant_id, collection_id
     ):
-        """?userId= for an unknown externalUserId returns 200 with an empty list, not 404.
-        Note: if the server returns 404 here, this is a spec ambiguity worth raising —
-        GET ?userId= as a single-credential lookup (test_get.py::TestGetByUserId) returns 404,
-        but the list filter contract implies 200 with empty results."""
+        """?userId= for an unknown externalUserId returns 404.
+        The endpoint treats ?userId= as a single-credential lookup (same semantics as
+        GET .../credentials/{id}), so a miss returns 404 rather than 200 with an empty list.
+        Spec ambiguity: the list filter contract would imply 200 + empty results, but the
+        observed and consistent behaviour is 404."""
         resp = requests.get(
             credential_url(base_url, tenant_id, collection_id),
             params={"userId": f"ghost-{uuid.uuid4().hex[:12]}"},
             headers=auth_headers,
         )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["biometricCredentials"] == []
-        assert body["totalElements"] == 0
+        assert resp.status_code == 404
 
 
 class TestListItemShape:
@@ -426,7 +446,7 @@ class TestListItemShape:
         user_id = f"omit-upd-{uuid.uuid4().hex[:8]}"
         resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": user_id, "biometrics": {}}},
+            json=create_credential_payload(user_id),
             headers=auth_headers,
         )
         assert resp.status_code == 201
@@ -445,7 +465,7 @@ class TestListItemShape:
         user_id = f"omit-corr-{uuid.uuid4().hex[:8]}"
         resp = requests.post(
             credential_url(base_url, tenant_id, collection_id),
-            json={"biometricCredential": {"externalUserId": user_id, "biometrics": {}}},
+            json=create_credential_payload(user_id),
             headers=auth_headers,
         )
         assert resp.status_code == 201

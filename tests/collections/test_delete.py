@@ -49,7 +49,7 @@ class TestDeleteSoftDelete:
 
         resp = requests.get(collection_url(base_url, tenant_id, cid), headers=auth_headers)
         assert resp.status_code == 404
-        assert resp.json().get("errorCode") == "NOT_FOUND"
+        assert resp.json().get("error") == "NOT_FOUND"
 
     def test_deleted_collection_excluded_from_list(self, base_url, auth_headers, tenant_id):
         """Soft-deleted collection does not appear in list results."""
@@ -80,7 +80,7 @@ class TestDeleteNotFound:
         """DELETE a random UUID returns 404 NOT_FOUND."""
         resp = requests.delete(collection_url(base_url, tenant_id, str(uuid.uuid4())), headers=auth_headers)
         assert resp.status_code == 404
-        assert resp.json().get("errorCode") == "NOT_FOUND"
+        assert resp.json().get("error") == "NOT_FOUND"
 
     def test_already_deleted_returns_404(self, base_url, auth_headers, tenant_id):
         """DELETE a soft-deleted collection a second time returns 404."""
