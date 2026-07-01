@@ -13,6 +13,7 @@ Endpoints:
 
 import uuid
 
+import pytest
 import requests
 
 from tests.tenant_preferences.conftest import preferences_url
@@ -193,6 +194,30 @@ class TestCreatePreference:
         assert resp.status_code == 400
 
 
+class TestSubKeyPathValidation:
+    """AWRNSS-469 regression: malformed subKey path segments must return 400
+    VALIDATION_FAILED, not 500. Fixed and verified on qa2 (2026-07-01)."""
+
+    @pytest.mark.parametrize(
+        "sub_key",
+        [
+            "sub/key",
+            "<script>alert(1)</script>",
+            "sub key",
+            "sub.key",
+            "sub_clé",
+            "'; DROP TABLE tenant_pref;--",
+        ],
+    )
+    def test_post_malformed_subkey_returns_400(self, base_url, auth_headers, tenant_id, sub_key):
+        """POST with a malformed subKey (path traversal, HTML, whitespace, unicode,
+        SQL-injection payload) returns 400 VALIDATION_FAILED, never 500."""
+        url = preferences_url(base_url, tenant_id, _TEST_KEY, sub_key)
+        resp = requests.post(url, json={"value": "test", "valueType": "STRING"}, headers=auth_headers)
+        assert resp.status_code == 400
+        requests.delete(url, headers=auth_headers)
+
+
 class TestUpsertSinglePreference:
 
     def test_put_creates_when_not_exists(self, base_url, auth_headers, tenant_id):
@@ -328,13 +353,15 @@ class TestPreferenceLifecycle:
 class TestValueValidation:
     """Edge cases for the value and valueType fields."""
 
-    def test_value_5000_chars_is_accepted(self, base_url, auth_headers, tenant_id):
-        """Value of 5000 chars is accepted — no server-side length cap documented.
-        Flagged for DB column overflow risk; behaviour recorded here as a baseline."""
+    @pytest.mark.parametrize("length", [5_000, 50_000, 1_000_000])
+    def test_oversized_value_returns_400(self, base_url, auth_headers, tenant_id, length):
+        """AWRNSS-467 [BUG]: no server-side max length is enforced on 'value'.
+        Expected 400 VALIDATION_FAILED once a defined max is exceeded; actual is
+        201 with the full value stored verbatim, at every size tested on qa2."""
         sub_key = f"long_val_{uuid.uuid4().hex[:8]}"
         url = preferences_url(base_url, tenant_id, _TEST_KEY, sub_key)
-        resp = requests.post(url, json={"value": "x" * 5000, "valueType": "STRING"}, headers=auth_headers)
-        assert resp.status_code == 201
+        resp = requests.post(url, json={"value": "x" * length, "valueType": "STRING"}, headers=auth_headers)
+        assert resp.status_code == 400
         requests.delete(url, headers=auth_headers)
 
     def test_valuetype_json_with_invalid_json_returns_400(self, base_url, auth_headers, tenant_id):

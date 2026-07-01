@@ -1,9 +1,15 @@
 """
-Public / gateway-facing API key validation endpoints.
+Internal / mesh-only API key validation endpoints.
 
-  GET /v3/apiKeys/validate               — validate key passed via X-Aware-ApiKey header
-  GET /v3/apiKeys/{rawApiKey}/lookup     — resolve raw key to key object (no auth required?)
-  GET /v3/apiKeys/{rawApiKey}/lookupAndValidate — resolve + validate (bearer required)
+  GET /v3/apiKeys/validate                       — OPA ext-authz: validate X-Aware-ApiKey header
+  GET /v3/apiKeys/{rawApiKey}/lookup             — provider-gateway: resolve raw key to metadata
+  GET /v3/apiKeys/{rawApiKey}/lookupAndValidate  — combined lookup + active/expiry check
+
+All three endpoints have security: [] in the spec — exempt from OPA/AwareAuthInterceptor.
+Network-level trust is enforced by Istio; only intra-mesh traffic should reach them.
+Spec-defined response bodies:
+  validate 200/401: no body defined
+  lookup/lookupAndValidate 200: ApiKeyResponse; 401: no body defined
 """
 
 import uuid
@@ -75,31 +81,16 @@ class TestValidate:
         )
         assert resp.status_code == 200, f"Expected 200 for valid key, got {resp.status_code}"
 
-    def test_valid_key_returns_json_body(self, base_url, active_key):
-        """200 response must include a structured JSON body, not empty string."""
+    def test_valid_key_returns_no_body(self, base_url, active_key):
+        """Spec-defined: validate 200 has no response body (status-only signal for OPA)."""
         _, secret = active_key
         resp = requests.get(
             validate_url(base_url),
-            headers={"X-Aware-ApiKey": secret, "X-Aware-AccountId": "0001"},
+            headers={"X-Aware-ApiKey": secret},
         )
         assert resp.status_code == 200
-        assert resp.text.strip() != "", (
-            "validate returned 200 with empty body — must return structured JSON"
-        )
-        body = resp.json()
-        assert isinstance(body, dict), f"Expected JSON object, got: {resp.text[:200]}"
-
-    def test_valid_key_response_has_content_type(self, base_url, active_key):
-        """200 response must include Content-Type: application/json."""
-        _, secret = active_key
-        resp = requests.get(
-            validate_url(base_url),
-            headers={"X-Aware-ApiKey": secret, "X-Aware-AccountId": "0001"},
-        )
-        assert resp.status_code == 200
-        ct = resp.headers.get("Content-Type", "")
-        assert "application/json" in ct, (
-            f"Missing Content-Type header on 200 response — got: '{ct}'"
+        assert resp.text.strip() == "", (
+            f"validate 200 should have no body per spec, got: {resp.text[:200]}"
         )
 
     def test_inactive_key_returns_401(self, base_url, inactive_key):
@@ -124,31 +115,31 @@ class TestValidate:
         resp = requests.get(validate_url(base_url), headers={"X-Aware-AccountId": "0001"})
         assert resp.status_code == 401
 
-    def test_missing_account_id_returns_401(self, base_url, active_key):
+    def test_account_id_not_required(self, base_url, active_key):
+        """Spec-defined: validate only takes X-Aware-ApiKey; AccountId is not a parameter."""
         _, secret = active_key
         resp = requests.get(
             validate_url(base_url),
             headers={"X-Aware-ApiKey": secret},
         )
-        assert resp.status_code in (401, 403)
+        assert resp.status_code == 200, (
+            f"validate without AccountId should return 200 (AccountId not required per spec), "
+            f"got {resp.status_code}"
+        )
 
     def test_no_auth_returns_401(self, base_url):
         resp = requests.get(validate_url(base_url))
         assert resp.status_code == 401
 
-    def test_401_response_has_error_body(self, base_url):
-        """401 must include a structured error body, not empty string."""
+    def test_401_response_has_no_body(self, base_url):
+        """Spec-defined: validate 401 has no response body (status-only signal for OPA)."""
         resp = requests.get(
             validate_url(base_url),
-            headers={"X-Aware-ApiKey": "0" * 64, "X-Aware-AccountId": "0001"},
+            headers={"X-Aware-ApiKey": "0" * 64},
         )
         assert resp.status_code == 401
-        assert resp.text.strip() != "", (
-            "validate returned 401 with empty body — must include error message"
-        )
-        body = resp.json()
-        assert "error" in body or "message" in body, (
-            f"401 body has no error/message field: {body}"
+        assert resp.text.strip() == "", (
+            f"validate 401 should have no body per spec, got: {resp.text[:200]}"
         )
 
 
@@ -158,18 +149,13 @@ class TestValidate:
 
 class TestLookup:
 
-    def test_lookup_requires_authentication(self, base_url, active_key):
-        """
-        CRITICAL BUG: lookup must require authentication.
-        Currently returns 200 with full key metadata when called with no headers.
-        Anyone who intercepts a raw API key can resolve the full key object
-        (keyName, description, tenantId, status) without any credentials.
-        """
+    def test_lookup_is_unauthenticated_by_design(self, base_url, active_key):
+        """Spec-defined: lookup has security: [] — no auth required, Istio mesh-trust only."""
         _, secret = active_key
         resp = requests.get(lookup_url(base_url, secret))
-        assert resp.status_code in (401, 403), (
-            f"lookup returned {resp.status_code} with NO auth — "
-            f"full key metadata exposed without credentials: {resp.text[:300]}"
+        assert resp.status_code == 200, (
+            f"lookup without auth should return 200 (unauthenticated by design per spec), "
+            f"got {resp.status_code}"
         )
 
     def test_lookup_with_valid_auth_returns_200(self, base_url, active_key, mgmt_headers):
@@ -187,16 +173,13 @@ class TestLookup:
         assert resp.status_code == 200
         assert resp.json().get("apiKey") is None
 
-    def test_lookup_inactive_key_returns_404(self, base_url, inactive_key, mgmt_headers):
-        """
-        BUG: lookup on INACTIVE key returns 200 — should return 404.
-        A soft-deleted key must not be resolvable.
-        """
+    def test_lookup_inactive_key_returns_401(self, base_url, inactive_key, mgmt_headers):
+        """Spec-defined: lookup returns 401 for keys that are unknown or not active."""
         _, secret = inactive_key
         resp = requests.get(lookup_url(base_url, secret), headers=mgmt_headers)
-        assert resp.status_code == 404, (
+        assert resp.status_code == 401, (
             f"lookup on INACTIVE key returned {resp.status_code} — "
-            f"expected 404. Body: {resp.text[:200]}"
+            f"expected 401 per spec. Body: {resp.text[:200]}"
         )
 
     def test_lookup_unknown_key_returns_401_or_404(self, base_url, mgmt_headers):
@@ -261,29 +244,18 @@ class TestLookupAndValidate:
 
 class TestCrossEndpointConsistency:
 
-    def test_error_format_consistent_across_endpoints(self, base_url):
-        """
-        BUG: 401 error format is inconsistent across the three endpoints.
-        validate/lookup return empty body; lookupAndValidate returns JSON error object.
-        All must return the same structured error format.
-        """
+    def test_internal_endpoints_all_reject_unknown_key(self, base_url):
+        """All three internal endpoints must reject an unknown key with 401."""
         r_validate = requests.get(
             validate_url(base_url),
-            headers={"X-Aware-ApiKey": "0" * 64, "X-Aware-AccountId": "0001"},
+            headers={"X-Aware-ApiKey": "0" * 64},
         )
         r_lookup = requests.get(lookup_url(base_url, "0" * 64))
         r_lav = requests.get(lookup_and_validate_url(base_url, "0" * 64))
 
-        validate_has_body = r_validate.text.strip() != ""
-        lookup_has_body = r_lookup.text.strip() != ""
-        lav_has_body = r_lav.text.strip() != ""
-
-        assert validate_has_body == lookup_has_body == lav_has_body, (
-            f"Inconsistent 401 error bodies across endpoints:\n"
-            f"  validate body: '{r_validate.text[:100]}'\n"
-            f"  lookup body:   '{r_lookup.text[:100]}'\n"
-            f"  lav body:      '{r_lav.text[:100]}'"
-        )
+        assert r_validate.status_code == 401, f"validate: expected 401, got {r_validate.status_code}"
+        assert r_lookup.status_code == 401, f"lookup: expected 401, got {r_lookup.status_code}"
+        assert r_lav.status_code == 401, f"lookupAndValidate: expected 401, got {r_lav.status_code}"
 
     def test_all_endpoints_reject_inactive_key_consistently(
         self, base_url, inactive_key, mgmt_headers

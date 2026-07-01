@@ -3,7 +3,8 @@ API Key lifecycle — revoke (PATCH), delete (soft-delete), rotation, get single
 
 Confirmed behavior:
   DELETE /{id} -> 204, key status becomes INACTIVE (soft-delete, still visible via GET)
-  PATCH  /{id} with keyStatus -> 200 but status DOES NOT CHANGE [KNOWN BUG]
+  PATCH  /{id} with {"status": "INACTIVE"} -> 200, status updated correctly
+  PATCH field is `status` (not `keyStatus`); valid values: ACTIVE, INACTIVE
 """
 
 import uuid
@@ -67,8 +68,8 @@ class TestDelete:
 
 class TestRevoke:
 
-    def test_revoke_changes_status_to_revoked(self, base_url, tenant_id, mgmt_headers):
-        """PATCH with keyStatus=REVOKED should change status but currently does not."""
+    def test_revoke_changes_status_to_inactive(self, base_url, tenant_id, mgmt_headers):
+        """PATCH {"status": "INACTIVE"} returns 200 and updates the key status."""
         resp = requests.post(
             api_keys_url(base_url, tenant_id),
             json=valid_create_payload(name=f"revoke-{uuid.uuid4().hex[:6]}"),
@@ -77,33 +78,33 @@ class TestRevoke:
         key_id = resp.json()["id"]
         patch = requests.patch(
             api_keys_url(base_url, tenant_id, key_id),
-            json={"keyStatus": "REVOKED"},
+            json={"status": "INACTIVE"},
             headers=mgmt_headers,
         )
         assert patch.status_code in (200, 204)
         get_resp = requests.get(api_keys_url(base_url, tenant_id, key_id), headers=mgmt_headers)
-        assert get_resp.json().get("status") == "REVOKED"
-        requests.delete(api_keys_url(base_url, tenant_id, key_id), headers=mgmt_headers)
+        assert get_resp.json().get("status") == "INACTIVE"
 
     def test_patch_returns_200(self, base_url, tenant_id, mgmt_headers, created_key):
-        """PATCH accepts the request and returns 200 even though status is not updated."""
+        """PATCH {"status": "INACTIVE"} on an active key returns 200."""
         resp = requests.patch(
             api_keys_url(base_url, tenant_id, created_key["id"]),
-            json={"keyStatus": "REVOKED"},
+            json={"status": "INACTIVE"},
             headers=mgmt_headers,
         )
         assert resp.status_code == 200
 
     def test_patch_nonexistent_key_returns_404(self, base_url, tenant_id, mgmt_headers):
+        """PATCH a non-existent key must return 404 NOT_FOUND."""
         resp = requests.patch(
             api_keys_url(base_url, tenant_id, str(uuid.uuid4())),
-            json={"keyStatus": "REVOKED"},
+            json={"status": "INACTIVE"},
             headers=mgmt_headers,
         )
         assert resp.status_code == 404
 
-    def test_patch_invalid_status_field_returns_400(self, base_url, tenant_id, mgmt_headers, created_key):
-        """Using `status` instead of `keyStatus` returns 400 (wrong field name)."""
+    def test_patch_invalid_status_value_returns_400(self, base_url, tenant_id, mgmt_headers, created_key):
+        """PATCH with an unrecognised status value returns 400 — REVOKED is not a valid enum value."""
         resp = requests.patch(
             api_keys_url(base_url, tenant_id, created_key["id"]),
             json={"status": "REVOKED"},

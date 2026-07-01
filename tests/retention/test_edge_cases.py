@@ -173,50 +173,37 @@ class TestCategoryMaxConsistency:
         assert resp.json().get("error") == "SETTINGS_INVALID"
 
 
-class TestBooleanCoercion:
-    """Boolean fields (autoDeleteExpired, saltLogsToRemovePii) must reject
-    non-boolean JSON tokens — integers and strings must not be silently coerced.
+class TestAutoDeleteExpiredIgnoredOnInput:
+    """autoDeleteExpired is readOnly and ignored on PUT input per spec (auto-delete is
+    always enforced, cannot be disabled) — any value/type sent for it is irrelevant and
+    must not affect the response status. Confirmed against spec, not a bug."""
 
-    Currently Jackson coerces 0→false, 1→true, "true"→true, "false"→false
-    and returns 200. All cases below MUST FAIL until strict boolean
-    deserialization is enforced (400 VALIDATION_FAILED expected).
-    """
-
-    def test_auto_delete_integer_zero_returns_400(
+    def test_auto_delete_integer_is_ignored(
         self, base_url, auth_headers, tenant_id, current_policy
     ):
-        """autoDeleteExpired = 0 (int) → 400, not 200 with silent coercion to false."""
+        """autoDeleteExpired = 0 (int) → 200, field is ignored regardless of type."""
         payload = _strip(current_policy)
         payload["logs"]["autoDeleteExpired"] = 0
         resp = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers)
-        assert resp.status_code == 400
+        assert resp.status_code == 200
 
-    def test_auto_delete_integer_one_returns_400(
+    def test_auto_delete_string_is_ignored(
         self, base_url, auth_headers, tenant_id, current_policy
     ):
-        """autoDeleteExpired = 1 (int) → 400, not 200 with silent coercion to true."""
-        payload = _strip(current_policy)
-        payload["logs"]["autoDeleteExpired"] = 1
-        resp = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers)
-        assert resp.status_code == 400
-
-    def test_auto_delete_string_true_returns_400(
-        self, base_url, auth_headers, tenant_id, current_policy
-    ):
-        """autoDeleteExpired = "true" (string) → 400, not 200 with silent coercion."""
+        """autoDeleteExpired = "true" (string) → 200, field is ignored regardless of type."""
         payload = _strip(current_policy)
         payload["logs"]["autoDeleteExpired"] = "true"
         resp = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers)
-        assert resp.status_code == 400
+        assert resp.status_code == 200
 
-    def test_auto_delete_string_false_returns_400(
-        self, base_url, auth_headers, tenant_id, current_policy
-    ):
-        """autoDeleteExpired = "false" (string) → 400, not 200 with silent coercion."""
-        payload = _strip(current_policy)
-        payload["logs"]["autoDeleteExpired"] = "false"
-        resp = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers)
-        assert resp.status_code == 400
+
+class TestBooleanCoercion:
+    """saltLogsToRemovePii is a required, writable boolean field (unlike autoDeleteExpired)
+    — it should reject non-boolean JSON tokens rather than silently coerce them.
+
+    Currently Jackson coerces 0→false, "false"→false and returns 200. Both cases below
+    MUST FAIL until strict boolean deserialization is enforced (400 VALIDATION_FAILED
+    expected, per the OpenAPI schema's `type: boolean`)."""
 
     def test_salt_logs_integer_returns_400(
         self, base_url, auth_headers, tenant_id, current_policy

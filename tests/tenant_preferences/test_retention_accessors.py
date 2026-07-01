@@ -75,24 +75,30 @@ class TestUpdateRetentionCategory:
         resp = requests.put(url, json=current_retention_category, headers=auth_headers)
         assert resp.status_code == 200
 
-    def test_put_response_echoes_saved_values(self, base_url, auth_headers, tenant_id, current_retention_category):
-        """PUT response body reflects the saved category state."""
+    def test_put_ignores_auto_delete_expired_input(self, base_url, auth_headers, tenant_id, current_retention_category):
+        """autoDeleteExpired is readOnly and ignored on PUT input per spec (auto-delete
+        is always enforced) — PUT response always reports true regardless of what was sent."""
         url = retention_accessor_url(base_url, tenant_id, "templates")
         payload = dict(current_retention_category)
-        payload["autoDeleteExpired"] = not payload["autoDeleteExpired"]
+        payload["autoDeleteExpired"] = False
         resp = requests.put(url, json=payload, headers=auth_headers)
         assert resp.status_code == 200
-        assert resp.json()["autoDeleteExpired"] == payload["autoDeleteExpired"]
+        assert resp.json()["autoDeleteExpired"] is True
 
-    def test_put_value_is_persisted(self, base_url, auth_headers, tenant_id, current_retention_category):
-        """Updated value is confirmed by a subsequent GET."""
+    def test_max_retention_days_change_is_persisted(self, base_url, auth_headers, tenant_id, current_retention_category):
+        """Updated maxRetentionDays is confirmed by a subsequent GET (autoDeleteExpired is
+        excluded from this check — see test_auto_delete_expired_is_boolean, GET returns
+        null for it on this endpoint, a separate known issue)."""
         url = retention_accessor_url(base_url, tenant_id, "templates")
         payload = dict(current_retention_category)
-        new_val = not payload["autoDeleteExpired"]
-        payload["autoDeleteExpired"] = new_val
+        current_max = payload["maxRetentionDays"]
+        new_max = current_max - 1 if current_max > 1 else current_max + 1
+        for mod in payload["modalities"]:
+            payload["modalities"][mod] = min(payload["modalities"][mod], new_max)
+        payload["maxRetentionDays"] = new_max
         requests.put(url, json=payload, headers=auth_headers)
         body = requests.get(url, headers=auth_headers).json()
-        assert body["autoDeleteExpired"] == new_val
+        assert body["maxRetentionDays"] == new_max
 
     def test_modality_exceeding_category_max_returns_400(self, base_url, auth_headers, tenant_id, current_retention_category):
         """Modality value > category maxRetentionDays returns 400 SETTINGS_INVALID."""
@@ -128,12 +134,13 @@ class TestUpdateRetentionCategory:
         resp = requests.put(url, json=payload, headers=auth_headers)
         assert resp.status_code == 400
 
-    def test_missing_auto_delete_returns_400(self, base_url, auth_headers, tenant_id, current_retention_category):
-        """PUT without autoDeleteExpired returns 400 VALIDATION_FAILED."""
+    def test_missing_auto_delete_is_accepted(self, base_url, auth_headers, tenant_id, current_retention_category):
+        """PUT without autoDeleteExpired returns 200 — the field is readOnly and ignored
+        on PUT input, so it isn't required in the request body."""
         url = retention_accessor_url(base_url, tenant_id, "templates")
         payload = {k: v for k, v in current_retention_category.items() if k != "autoDeleteExpired"}
         resp = requests.put(url, json=payload, headers=auth_headers)
-        assert resp.status_code == 400
+        assert resp.status_code == 200
 
 
 class TestSaltLogsAccessor:

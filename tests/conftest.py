@@ -67,49 +67,50 @@ def _static_bearer_token():
 
 
 def _fetch_bearer_token():
-    """Mint a fresh access token via Keycloak password grant. '' if no creds."""
-    static = _static_bearer_token()
-    if static:
-        return static
+    """Return a valid Keycloak access token for the current session.
 
+    Priority:
+      1. If credentials are available (env vars or .keycloak_creds), always mint
+         a fresh token so expired-token failures never happen mid-suite.
+      2. If only a static token is available (AWARE_BEARER_TOKEN / .bearer_token),
+         use it as-is — the caller will skip/fail if it turns out to be expired.
+    """
     creds = _read_creds_file()
     username = AWARE_USERNAME or creds.get("USERNAME", "")
     password = AWARE_PASSWORD or creds.get("PASSWORD", "")
-    has_client_creds = bool(creds.get("CLIENT_SECRET", KEYCLOAK_CLIENT_SECRET))
-    # Need either a user login (password grant) or a client secret (client_credentials).
-    if not (username and password) and not has_client_creds:
-        return ""
-
-    client_id = creds.get("CLIENT_ID", KEYCLOAK_CLIENT_ID)
     client_secret = creds.get("CLIENT_SECRET", KEYCLOAK_CLIENT_SECRET)
-    realm = creds.get("REALM", KEYCLOAK_REALM)
 
-    url = f"{KEYCLOAK_URL}/realms/{realm}/protocol/openid-connect/token"
+    if (username and password) or client_secret:
+        client_id = creds.get("CLIENT_ID", KEYCLOAK_CLIENT_ID)
+        realm = creds.get("REALM", KEYCLOAK_REALM)
+        url = f"{KEYCLOAK_URL}/realms/{realm}/protocol/openid-connect/token"
 
-    # password grant if a user login is supplied, else client_credentials.
-    if username and password:
-        data = {
-            "grant_type": "password",
-            "client_id": client_id,
-            "username": username,
-            "password": password,
-            "scope": "openid",
-        }
-        if client_secret:
-            data["client_secret"] = client_secret
-    else:
-        data = {
-            "grant_type": "client_credentials",
-            "client_id": client_id,
-            "client_secret": client_secret,
-        }
+        if username and password:
+            data = {
+                "grant_type": "password",
+                "client_id": client_id,
+                "username": username,
+                "password": password,
+                "scope": "openid",
+            }
+            if client_secret:
+                data["client_secret"] = client_secret
+        else:
+            data = {
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+            }
 
-    resp = _requests_module.post(url, data=data, timeout=20)
-    if resp.status_code != 200:
-        raise RuntimeError(
-            f"Keycloak token request failed ({resp.status_code}): {resp.text[:300]}"
-        )
-    return resp.json()["access_token"]
+        resp = _requests_module.post(url, data=data, timeout=20)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Keycloak token request failed ({resp.status_code}): {resp.text[:300]}"
+            )
+        return resp.json()["access_token"]
+
+    # No credentials — fall back to a static token (env var or .bearer_token file).
+    return _static_bearer_token()
 
 # Minimal 1×1 gray-pixel JPEG — satisfies structural validation but is not a face.
 # Only use this for tests that expect non-200 responses (validation/auth/policy errors).

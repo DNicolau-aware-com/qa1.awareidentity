@@ -59,12 +59,12 @@ and error behavior.
 |---|---|---|
 | `conftest.py` | — | Auth/tenant overrides, URL builder, `valid_policy()` helper, `current_policy` and `system_ceilings` fixtures |
 | `test_auth.py` | 8 | Two-layer auth: gateway JWT (401/400) + app API-key (403/200) |
-| `test_get.py` | 19 | GET happy path, shape, data integrity, not-found |
-| `test_update.py` | 38 | PUT happy path, server-managed fields, business rules, validation, atomicity, error shape, not-found |
+| `test_get.py` | 18 | GET happy path, shape, data integrity, not-found |
+| `test_update.py` | 39 | PUT happy path, server-managed fields, business rules, validation, atomicity, error shape, not-found |
 | `test_path_params.py` | 3 | Non-UUID tenantId path parameter validation |
-| `test_edge_cases.py` | 21 | Numeric overflow, unsupported HTTP methods, category/modality consistency, boolean coercion, modality value/key validation |
+| `test_edge_cases.py` | 19 | Numeric overflow, unsupported HTTP methods, category/modality consistency, `autoDeleteExpired` ignored-on-input, boolean coercion, modality value/key validation |
 
-**Total: 89 tests** — last run (qa2, test02): **63 passed, 26 known-bug failures**.
+**Total: 87 tests** — last run (qa2, test02, 2026-07-01): **84 passed, 3 known-bug failures.**
 
 ## Running
 
@@ -74,10 +74,11 @@ pytest tests/retention/ -v
 
 # Single file
 pytest tests/retention/test_update.py -v
-
-# Only tests expected to pass (skip known-bug tests)
-pytest tests/retention/ -v -k "not BUG"
 ```
+
+> There is currently no marker/keyword split between passing and known-bug tests
+> (`-k "not BUG"` is a no-op — "BUG" only appears in docstrings, which `-k` does not
+> match). The 3 known-bug tests are listed individually under **Known Bugs** below.
 
 ## Fixtures
 
@@ -143,21 +144,28 @@ A one-shot token can also be dropped into `tests/.bearer_token`, or supplied via
 `AWARE_BEARER_TOKEN`. The suite runs against the **test02** tenant so the API key
 (`API_KEY_2`) and the bearer's realm line up.
 
-## Known Bugs (found by this suite — 9 failing tests on qa2/test02)
+## Known Bugs (found by this suite — 3 failing tests on qa2/test02, as of 2026-07-01)
 
 | ID | Description | Expected | Actual | Affected tests |
 |---|---|---|---|---|
-| BUG-R1 | Invalid field **type** in PUT body, or empty body, throws instead of validating | `400 VALIDATION_FAILED` | `500` (Jackson JSON parse error) | `test_string_max_retention_days_returns_400`, `test_string_modality_value_returns_400`, `test_non_boolean_auto_delete_returns_400`, `test_non_boolean_salt_logs_returns_400`, `test_empty_body_returns_400` |
-| BUG-R2 | Omitting `saltLogsToRemovePii` (optional per spec) is rejected | `200` | `500` (JSON parse error) | `test_missing_salt_logs_flag_is_accepted` |
-| BUG-R3 | Non-UUID `tenantId` path param not validated | `400` | `500` (Internal Server Error) | All 3 tests in `test_path_params.py` |
-| BUG-R4 | `maxRetentionDays` > `Integer.MAX_VALUE` (2147483647) triggers Jackson numeric range error instead of 400 | `400 VALIDATION_FAILED` | `500` "JSON parse error: Numeric value (...) out of range of int" | `test_max_retention_days_int_max_plus_one_returns_400`, `test_max_retention_days_long_overflow_returns_400` |
-| BUG-R5 | POST and DELETE return 500; unsupported methods must return 405 with `Allow` header (RFC 9110 §15.5.6) | `405 Method Not Allowed` + `Allow: GET, PUT` | `500` (HttpRequestMethodNotSupportedException unmapped) | `test_post_method_returns_405`, `test_delete_method_returns_405`, `test_post_response_includes_allow_header` |
+| BUG-R6 | `saltLogsToRemovePii` silently coerces non-boolean JSON tokens instead of rejecting them | `400 VALIDATION_FAILED` | `200` — `0`→false, `"false"`→false (Jackson lenient coercion) | `test_salt_logs_integer_returns_400`, `test_salt_logs_string_returns_400` |
+| BUG-R7 | Modality value `null` is silently ignored instead of rejected | `400 VALIDATION_FAILED` | `200` — the field is left unchanged, no error | `test_modality_value_null_returns_400` |
 
-**BUG-R1** is the highest-impact: any client sending a wrong-typed value gets an
-opaque 500 instead of a field-level 400, and the documented `VALIDATION_FAILED`
-error shape is never produced for type errors. **BUG-R2** needs a spec↔impl
-decision: either the impl should accept the missing flag (200) or the spec should
-mark it required (then a clean 400 is expected, still not 500).
+Arbitrary non-boolean strings (e.g. `"nope"`) are already correctly rejected for
+`saltLogsToRemovePii` (`test_non_boolean_salt_logs_returns_400` passes) — BUG-R6 is
+specifically about the tokens Jackson coerces (`0`/`1`/`"true"`/`"false"`).
+
+### Previously tracked bugs — now fixed (verified 2026-07-01, qa2/test02)
+
+BUG-R1 through BUG-R5 (invalid field type / empty body → 500, non-UUID tenantId →
+500, `maxRetentionDays` > INT_MAX → 500, unsupported HTTP methods → 500) have all
+been fixed server-side and now return the correct 400/405. See
+`tests/AWRNSS_RETEST_REPORT.md` for the full retest evidence and the corresponding
+Jira tickets (AWRNSS-455/457/458/459).
+
+Two other tests that were flagged as bugs turned out to be **incorrect test
+assumptions**, not server bugs — see "Spec notes" below before trusting old
+assumptions about `autoDeleteExpired` or `saltLogsToRemovePii`'s required-ness.
 
 ## Error Codes
 
@@ -171,10 +179,18 @@ mark it required (then a clean 400 is expected, still not 500).
 
 ## Spec notes
 
-- **`saltLogsToRemovePii` is optional.** `DataRetentionPolicy.required` is
-  `[templates, enrollmentImages, logs]` only — a PUT body without
-  `saltLogsToRemovePii` is structurally valid (see
-  `test_missing_salt_logs_flag_is_accepted`).
+- **`saltLogsToRemovePii` IS required.** `DataRetentionPolicy.required` is
+  `[templates, enrollmentImages, logs, saltLogsToRemovePii]` — a PUT body
+  without it correctly returns 400 (see `test_missing_salt_logs_flag_returns_400`).
+  An earlier version of this README/suite claimed the field was optional; that
+  was a misreading of the spec, not a server bug.
+- **`autoDeleteExpired` is read-only and ignored on PUT input.** Per spec,
+  auto-delete is always enforced and cannot be disabled — the field is emitted
+  as `true` on GET (bulk endpoint) and any value sent for it on PUT is silently
+  ignored (no error, no effect). Tests must not assert that toggling it persists,
+  and must not require it to be present or well-typed in a PUT body. See
+  `TestAutoDeleteExpiredIgnoredOnInput` in `test_edge_cases.py` and the
+  corresponding tests in `test_update.py`.
 - **`systemMaxRetentionDays` is read-only.** Emitted on GET, ignored on PUT.
   Tests confirm a client-supplied value is not persisted.
 - **`Error` requires `status` and `message`.** `timestamp`, `error`, and

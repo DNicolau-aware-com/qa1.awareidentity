@@ -4,9 +4,6 @@ API key authentication tests — AWRNSS-388.
 Verifies that a newly issued key authenticates API requests,
 that soft-deleted (INACTIVE) keys are rejected, and that the
 last-used timestamp is updated on successful authentication.
-
-NOTE: lastUsedAt tracking appears to not be implemented —
-existing keys used thousands of times still show null. Marked xfail.
 """
 
 import uuid

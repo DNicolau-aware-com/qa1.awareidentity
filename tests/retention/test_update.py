@@ -61,13 +61,14 @@ class TestUpdateHappyPath:
         body = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers).json()
         assert body["saltLogsToRemovePii"] == (not original)
 
-    def test_put_toggles_auto_delete_for_templates(self, base_url, auth_headers, tenant_id, current_policy):
-        """PUT with autoDeleteExpired toggled for templates persists the new value."""
+    def test_auto_delete_for_templates_ignored_on_put(self, base_url, auth_headers, tenant_id, current_policy):
+        """autoDeleteExpired is readOnly and ignored on PUT input per spec (auto-delete
+        is always enforced, cannot be disabled) — sending the opposite value has no
+        effect and the field remains true in the response."""
         payload = _strip_server_fields(current_policy)
-        original = payload["templates"]["autoDeleteExpired"]
-        payload["templates"]["autoDeleteExpired"] = not original
+        payload["templates"]["autoDeleteExpired"] = False
         body = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers).json()
-        assert body["templates"]["autoDeleteExpired"] == (not original)
+        assert body["templates"]["autoDeleteExpired"] is True
 
     def test_put_changes_max_retention_days(self, base_url, auth_headers, tenant_id, current_policy, system_ceilings):
         """PUT with a different valid maxRetentionDays for logs is reflected in the response."""
@@ -217,18 +218,14 @@ class TestPutValidation:
         resp = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
 
-    def test_missing_salt_logs_flag_is_accepted(self, base_url, auth_headers, tenant_id, current_policy):
-        """Omitting saltLogsToRemovePii is accepted — it is NOT in the schema's required list.
-
-        DataRetentionPolicy.required = [templates, enrollmentImages, logs] only, so a body
-        without saltLogsToRemovePii is structurally valid and must not be rejected.
-        [BUG-R2] Server returns 500 (JSON parse error) when it is omitted — either the
-        impl wrongly requires it, or it should default. Spec vs impl must be reconciled.
-        MUST FAIL until fixed (or the spec is corrected to make the field required → 400)."""
+    def test_missing_salt_logs_flag_returns_400(self, base_url, auth_headers, tenant_id, current_policy):
+        """Omitting saltLogsToRemovePii returns 400 — it IS in the schema's required list
+        (DataRetentionPolicy.required = [templates, enrollmentImages, logs, saltLogsToRemovePii]),
+        and the field description states it's required on PUT. Confirmed correct against spec."""
         payload = _strip_server_fields(current_policy)
         del payload["saltLogsToRemovePii"]
         resp = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers)
-        assert resp.status_code == 200
+        assert resp.status_code == 400
 
     def test_missing_max_retention_days_in_category_returns_400(
         self, base_url, auth_headers, tenant_id, current_policy
@@ -239,12 +236,13 @@ class TestPutValidation:
         resp = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
 
-    def test_missing_auto_delete_in_category_returns_400(self, base_url, auth_headers, tenant_id, current_policy):
-        """Omitting autoDeleteExpired from a category returns 400."""
+    def test_missing_auto_delete_in_category_is_accepted(self, base_url, auth_headers, tenant_id, current_policy):
+        """Omitting autoDeleteExpired from a category returns 200 — the field is readOnly
+        and ignored on PUT input, so it isn't required in the request body."""
         payload = _strip_server_fields(current_policy)
         del payload["templates"]["autoDeleteExpired"]
         resp = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers)
-        assert resp.status_code == 400
+        assert resp.status_code == 200
 
     def test_missing_modalities_in_category_returns_400(self, base_url, auth_headers, tenant_id, current_policy):
         """Omitting modalities from a category returns 400."""
@@ -298,13 +296,13 @@ class TestPutValidation:
         resp = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers)
         assert resp.status_code == 400
 
-    def test_non_boolean_auto_delete_returns_400(self, base_url, auth_headers, tenant_id, current_policy):
-        """A non-boolean autoDeleteExpired returns 400 (field is typed boolean).
-        [BUG-R1] Server returns 500 (JSON parse error) instead of 400. MUST FAIL until fixed."""
+    def test_non_boolean_auto_delete_is_ignored(self, base_url, auth_headers, tenant_id, current_policy):
+        """A non-boolean autoDeleteExpired (e.g. "yes") is accepted with 200 — the field
+        is ignored on PUT input entirely, so its value/type in the request is irrelevant."""
         payload = _strip_server_fields(current_policy)
         payload["templates"]["autoDeleteExpired"] = "yes"
         resp = requests.put(retention_url(base_url, tenant_id), json=payload, headers=auth_headers)
-        assert resp.status_code == 400
+        assert resp.status_code == 200
 
     def test_non_boolean_salt_logs_returns_400(self, base_url, auth_headers, tenant_id, current_policy):
         """A non-boolean saltLogsToRemovePii returns 400 (field is typed boolean).

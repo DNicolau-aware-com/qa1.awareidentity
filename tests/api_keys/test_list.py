@@ -70,21 +70,17 @@ class TestListShape:
 class TestListContent:
 
     def test_newly_created_key_appears_in_list(self, base_url, tenant_id, mgmt_headers, created_key):
-        """Key appears somewhere in the full paginated list (fetches all pages up to 500 keys)."""
+        """Newly created key appears on the first page when sorted by createdAt,desc."""
         target_id = created_key["id"]
-        page = 0
-        while True:
-            body = requests.get(
-                api_keys_url(base_url, tenant_id),
-                params={"page": page, "size": 50},
-                headers=mgmt_headers,
-            ).json()
-            ids = [k["id"] for k in body["content"]]
-            if target_id in ids:
-                break
-            if body.get("last") or page >= 9:
-                pytest.fail(f"Newly created key {target_id} not found after checking {page + 1} pages")
-            page += 1
+        body = requests.get(
+            api_keys_url(base_url, tenant_id),
+            params={"sort": "createdAt,desc", "size": 10},
+            headers=mgmt_headers,
+        ).json()
+        ids = [k["id"] for k in body["content"]]
+        assert target_id in ids, (
+            f"Newly created key {target_id} not found in first page (sort=createdAt,desc)"
+        )
 
     def test_new_key_has_active_status_in_list(self, base_url, tenant_id, mgmt_headers, created_key):
         """Verify status via GET /{id} — consistent regardless of pagination."""

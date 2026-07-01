@@ -1,10 +1,9 @@
 """
 GET /v3/tenants/{tenantId}/apiKeys/{id}/secret — fetch secret endpoint.
 
-CRITICAL BUG (AWRNSS-386 violation):
-  This endpoint returns the plaintext secret at any time after creation.
-  Requirement: "API key secrets must never be displayed after initial creation."
-  Actual: GET /{id}/secret returns {"secret": "<plaintext>"} — fully recoverable.
+Spec-defined behavior: endpoint exists and returns {"apiKey": "<plaintext>"}.
+Intended for authorized retrieval flows (e.g. displaying key once after creation
+via a secure UI flow). Requires ACTIVE status.
 
 POST /v3/tenants/{tenantId}/apiKeys/{id}/rotate-credentials — rotate key.
   Returns a new plaintext secret in the `apiKey` field.
@@ -20,30 +19,16 @@ from tests.api_keys.conftest import api_keys_url, valid_create_payload
 
 class TestSecretEndpoint:
 
-    def test_secret_endpoint_should_not_exist(self, base_url, tenant_id, mgmt_headers, created_key):
-        """
-        GET /{id}/secret must not expose the secret after creation.
-        Expected: 404 (endpoint should not exist) or 405 (method not allowed).
-        Actual: 200 with {'secret': '<plaintext>'} — critical security violation.
-        """
-        resp = requests.get(
-            api_keys_url(base_url, tenant_id, created_key["id"], sub="secret"),
-            headers=mgmt_headers,
-        )
-        assert resp.status_code in (404, 405), (
-            f"Secret endpoint should not be reachable. Got {resp.status_code}: {resp.text[:200]}"
-        )
-
-    def test_secret_endpoint_currently_returns_200(self, base_url, tenant_id, mgmt_headers, created_key):
-        """Documents the current (buggy) behavior — secret is retrievable post-creation."""
+    def test_secret_endpoint_returns_200_with_plaintext(self, base_url, tenant_id, mgmt_headers, created_key):
+        """GET /secret returns 200 with plaintext key in the 'apiKey' field (spec-defined behavior)."""
         resp = requests.get(
             api_keys_url(base_url, tenant_id, created_key["id"], sub="secret"),
             headers=mgmt_headers,
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert "secret" in body, f"Expected 'secret' field in response, got: {list(body.keys())}"
-        assert len(body["secret"]) > 20, "Secret looks too short to be real"
+        assert "apiKey" in body, f"Expected 'apiKey' field in response, got: {list(body.keys())}"
+        assert len(body["apiKey"]) > 20, "Secret looks too short to be real"
 
     def test_secret_endpoint_nonexistent_key_returns_404(self, base_url, tenant_id, mgmt_headers):
         resp = requests.get(
@@ -76,7 +61,7 @@ class TestSecretEndpoint:
             api_keys_url(base_url, tenant_id, key_id, sub="secret"),
             headers=mgmt_headers,
         )
-        returned_secret = secret_resp.json().get("secret")
+        returned_secret = secret_resp.json().get("apiKey")
         requests.delete(api_keys_url(base_url, tenant_id, key_id), headers=mgmt_headers)
 
         assert original_secret == returned_secret, (

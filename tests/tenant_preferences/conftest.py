@@ -30,6 +30,10 @@ def security_accessor_url(base_url, tenant_id, field):
     return f"{base_url}/v3/tenants/{tenant_id}/security-settings/{field}"
 
 
+def security_settings_url(base_url, tenant_id):
+    return f"{base_url}/v3/tenants/{tenant_id}/security-settings"
+
+
 # ---------------------------------------------------------------------------
 # Tenant / auth overrides — use test02 (seeded tenant)
 # ---------------------------------------------------------------------------
@@ -97,6 +101,15 @@ def current_password_reset_lifetime(base_url, auth_headers, tenant_id):
 def current_retention_category(base_url, auth_headers, tenant_id):
     """Snapshot+restore templates retention for tests that modify it."""
     url = retention_accessor_url(base_url, tenant_id, "templates")
+    snap = requests.get(url, headers=auth_headers, timeout=10).json()
+    yield snap
+    requests.put(url, json=snap, headers=auth_headers, timeout=10)
+
+
+@pytest.fixture
+def current_security_settings(base_url, auth_headers, tenant_id):
+    """Snapshot+restore the bulk security-settings object for tests that modify it."""
+    url = security_settings_url(base_url, tenant_id)
     snap = requests.get(url, headers=auth_headers, timeout=10).json()
     yield snap
     requests.put(url, json=snap, headers=auth_headers, timeout=10)
