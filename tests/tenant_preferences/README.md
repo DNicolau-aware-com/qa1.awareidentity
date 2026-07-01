@@ -87,6 +87,8 @@ Integration tests for the **Aware Tenant Service — Tenant Preferences API (Int
 | AWRNSS-467 | `POST /preferences/{key}/{subKey}` accepts unbounded value length | `400` past some max | `201` at 5k/50k/1M chars | `test_preferences.py::TestValueValidation::test_oversized_value_returns_400` |
 
 Full evidence and Jira ticket cross-reference for all of these: `tests/AWRNSS_RETEST_REPORT.md`.
+Full test-case list and results for the security-settings suites specifically:
+`SECURITY_SETTINGS_REPORT.md`.
 
 ## Structure
 
